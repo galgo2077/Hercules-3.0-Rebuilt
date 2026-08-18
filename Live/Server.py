@@ -10,12 +10,14 @@ import uvicorn
 from fastapi import Depends, FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from Live.Auth import AuthUser, require_auth
 from SharedParams.Config import HerculesConfig
 
 _ROOT = Path(__file__).resolve().parents[1]
 _KILL_SWITCH = _ROOT / ".hercules" / "kill-switch.json"
+_STATIC = _ROOT / "dashboard"
 
 
 def _security_cfg() -> dict:
@@ -34,6 +36,15 @@ def _build_app() -> FastAPI:
         allow_headers=["*"],
     )
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=sec.get("allowed_hosts", ["*"]))
+
+    from Live.AccountsRouter import router as accounts_router
+    from Live.AuthRouter import router as auth_router
+    app.include_router(auth_router)
+    app.include_router(accounts_router)
+
+    if _STATIC.exists():
+        app.mount("/", StaticFiles(directory=str(_STATIC), html=True), name="static")
+
     return app
 
 
@@ -56,7 +67,8 @@ async def get_config(user: _User) -> dict[str, Any]:
     cfg = load()
     return {
         "portfolio": {"weights": cfg.portfolio.weights, "leverage": cfg.portfolio.leverage},
-        "backtest": {"start": cfg.backtest.start_date, "end": cfg.backtest.end_date, "assets": cfg.backtest.assets},
+        "backtest": {"start": cfg.backtest.start_date, "end": cfg.backtest.end_date,
+                     "assets": cfg.backtest.assets},
         "server": {"host": cfg.server.host, "port": cfg.server.port, "mode": cfg.server.mode},
     }
 
@@ -65,22 +77,36 @@ async def get_config(user: _User) -> dict[str, Any]:
 
 @app.get("/api/trades")
 async def list_trades(user: _User, limit: int = 50) -> list[dict]:
+    from Storage.Repos import list_trades as _list
     from SharedParams.Supabase import get_client
-    client = get_client()
-    resp = (
-        client.table("trades")
-        .select("*")
-        .order("entry_time", desc=True)
-        .limit(limit)
-        .execute()
-    )
+    resp = (get_client().table("trades").select("*")
+            .order("entry_time", desc=True).limit(limit).execute())
     return resp.data or []
 
 
 @app.delete("/api/trades/{trade_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_trade(trade_id: int, user: _User) -> None:
+    from SharedParams.Supabase import get_service_client
+    get_service_client().table("trades").delete().eq("id", trade_id).execute()
+
+
+# ── Positions ─────────────────────────────────────────────────────────────────
+
+@app.get("/api/positions")
+async def get_positions(user: _User) -> list[dict]:
     from SharedParams.Supabase import get_client
-    get_client().table("trades").delete().eq("id", trade_id).execute()
+    resp = (get_client().table("live_positions").select("*").execute())
+    return resp.data or []
+
+
+# ── Equity ────────────────────────────────────────────────────────────────────
+
+@app.get("/api/equity")
+async def get_equity(user: _User, limit: int = 200) -> list[dict]:
+    from SharedParams.Supabase import get_client
+    resp = (get_client().table("equity_snapshots").select("*")
+            .order("ts", desc=True).limit(limit).execute())
+    return list(reversed(resp.data or []))
 
 
 # ── Candles ───────────────────────────────────────────────────────────────────
@@ -127,10 +153,7 @@ async def kill_reset(user: _User) -> dict[str, str]:
 async def run_backtest_endpoint(user: _User) -> dict[str, Any]:
     from Backtest.Runner import run
     result = run()
-    return {
-        "trades": result.trades.to_dicts(),
-        "results": result.results.to_dicts(),
-    }
+    return {"trades": result.trades.to_dicts(), "results": result.results.to_dicts()}
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────

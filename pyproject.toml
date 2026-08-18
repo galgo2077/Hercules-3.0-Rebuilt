@@ -30,6 +30,7 @@ features = ["pyo3/extension-module"]
 testpaths = ["tests"]
 addopts = "-s"
 pythonpath = ["."]
+markers = ["slow: requires Binance network and original repo (deselect with -m 'not slow')"]
 
 [tool.ruff]
 line-length = 100

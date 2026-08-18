@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Hercules — Login</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0d0d0d;color:#e0e0e0;font-family:monospace;display:flex;align-items:center;justify-content:center;min-height:100vh}
+.card{background:#1a1a1a;border:1px solid #2a2a2a;padding:2rem;width:360px}
+h1{color:#fff;font-size:1.2rem;margin-bottom:1.5rem;letter-spacing:.1em}
+label{display:block;font-size:.75rem;color:#888;margin-bottom:.3rem}
+input{width:100%;background:#111;border:1px solid #333;color:#e0e0e0;padding:.6rem .8rem;font-family:monospace;font-size:.9rem;margin-bottom:1rem}
+input:focus{outline:none;border-color:#555}
+button{width:100%;background:#2a2a2a;border:1px solid #444;color:#e0e0e0;padding:.7rem;font-family:monospace;font-size:.9rem;cursor:pointer}
+button:hover{background:#333}
+#err{color:#e55;font-size:.8rem;margin-top:.8rem;display:none}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>HERCULES 3.0</h1>
+  <label>EMAIL</label>
+  <input id="email" type="email" autocomplete="username">
+  <label>PASSWORD</label>
+  <input id="pass" type="password" autocomplete="current-password">
+  <button onclick="login()">LOGIN</button>
+  <div id="err"></div>
+</div>
+<script>
+async function login(){
+  const email=document.getElementById('email').value;
+  const pass=document.getElementById('pass').value;
+  const err=document.getElementById('err');
+  err.style.display='none';
+  try{
+    const r=await fetch('/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password:pass})});
+    if(!r.ok){const d=await r.json();throw new Error(d.detail||'login failed');}
+    const d=await r.json();
+    localStorage.setItem('access_token',d.access_token);
+    localStorage.setItem('refresh_token',d.refresh_token);
+    window.location='/';
+  }catch(e){err.textContent=e.message;err.style.display='block';}
+}
+document.addEventListener('keydown',e=>{if(e.key==='Enter')login();});
+</script>
+</body>
+</html>

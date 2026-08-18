@@ -510,11 +510,180 @@ Auth implemented in `Live/Auth.py` — FastAPI `require_auth` dependency validat
 
 ---
 
-## LOC Summary (all phases)
+## PHASE 11 — Credential Encryption
+**Status:** COMPLETE — `Live/Crypto.py`
+AES-256-GCM encrypt/decrypt for Binance API keys. `store_credential` / `load_credential` via Supabase. Master key from `HERCULES_MASTER_KEY` env var (32-byte base64). Random nonce per encrypt, tag stored alongside ciphertext.
+
+**PHASE 11: PASS**
+
+---
+
+## PHASE 12 — Risk Management
+**Status:** COMPLETE — `Live/Risk.py`
+`RiskState` dataclass, `check_entry` (kill switch → drawdown → amount → short cap), `size_trade`, `on_entry`/`on_exit`, `update_equity`. Pre-trade gate wired into DemoEngine and PaperEngine.
+
+**PHASE 12: PASS**
+
+---
+
+## PHASE 13 — Reconciliation
+**Status:** COMPLETE — `Live/Reconcile.py`
+`reconcile` diffs local PositionTracker vs exchange positions. `resolve` closes unexpected positions. `sync_tracker` one-call reconcile + re-fetch.
+
+**PHASE 13: PASS**
+
+---
+
+## PHASE 14 — Candle Buffer
+**Status:** COMPLETE — `Dataframe/CandleBuffer.py`
+Per-asset `deque` (fixed capacity). `ingest_ws` parses Binance WS kline msg. `ready(min_bars)` gates strategy. `health`, `to_dicts`, `reset`. Replaces raw list in Demo/Paper engines.
+
+**PHASE 14: PASS**
+
+---
+
+## PHASE 15 — Storage Repositories
+**Status:** COMPLETE — `Storage/Repos.py`
+Supabase CRUD: `insert_trade`, `close_trade`, `list_trades`, `upsert_equity`, `list_equity`, `upsert_position`, `clear_position`, `list_positions`. Service client for writes, anon client for reads.
+
+**PHASE 15: PASS**
+
+---
+
+## PHASE 16 — Worker Leases
+**Status:** COMPLETE — `Live/Worker.py`
+`acquire_lease`, `renew_lease`, `release_lease` against Supabase `worker_leases` table. `AccountWorker` dataclass: acquires lease → starts engine thread → renews every 30s → releases on stop.
+
+**PHASE 16: PASS**
+
+---
+
+## PHASE 17 — Candle Gap Recovery
+**Status:** COMPLETE — `Dataframe/Recovery.py`
+`detect_gap` checks if last candle is stale (>2× interval). `fill_gap` fetches missing candles via Binance REST → ingests into CandleBuffer. `recover` runs both for all assets on reconnect.
+
+**PHASE 17: PASS**
+
+---
+
+## PHASE 18 — Paper Engine
+**Status:** COMPLETE — `Live/Paper.py`
+Same WebSocket loop as DemoEngine. No real orders. `VirtualPosition`, virtual P&L tracking. `PaperTrade` records with pnl computed from price delta. `equity`, `trades`, `positions` properties.
+
+**PHASE 18: PASS**
+
+---
+
+## PHASE 19 — Test Suite
+**Status:** COMPLETE — `tests/`
+28 unit tests, 28/28 pass (~0.07s). Excludes `@pytest.mark.slow` (backtest parity, requires network).
+
+| File | Tests | What |
+|---|---|---|
+| `test_crypto.py` | 5 | AES roundtrip, tamper detection, nonce uniqueness |
+| `test_risk.py` | 12 | Entry gates, drawdown halt, short cap, kill switch, equity update |
+| `test_candle_buffer.py` | 11 | Ingest, dedup, capacity, WS parse, health, reset |
+| `test_backtest_parity.py` | 3 | Trade count=7, all wins, asset/side pairs (marked slow) |
+
+**PHASE 19: PASS**
+
+---
+
+## PHASE 20 — Auth + Accounts API
+**Status:** COMPLETE — `Live/AuthRouter.py`, `Live/AccountsRouter.py`
+
+| File | Endpoints |
+|---|---|
+| `Live/AuthRouter.py` | POST /api/auth/login, POST /api/auth/logout, POST /api/auth/refresh |
+| `Live/AccountsRouter.py` | GET /api/accounts, POST /api/accounts, DELETE /api/accounts/{id} |
+
+API keys encrypted with AES-GCM before insert. Routers included in Server.py.
+
+**PHASE 20: PASS**
+
+---
+
+## PHASE 21 — Positions + Equity Endpoints
+**Status:** COMPLETE — added to `Live/Server.py`
+`GET /api/positions` → live_positions table. `GET /api/equity?limit=200` → equity_snapshots ordered by ts asc.
+
+**PHASE 21: PASS**
+
+---
+
+## PHASE 22 — Dashboard HTML
+**Status:** COMPLETE — `dashboard/`
+
+| File | What |
+|---|---|
+| `dashboard/login.html` | Email/password → /api/auth/login, stores JWT in localStorage |
+| `dashboard/index.html` | Status, open positions, trades table, kill switch toggle, 15s auto-refresh |
+| `dashboard/404.html` | Minimal 404 page |
+
+FastAPI serves `dashboard/` as static files at `/`. Auth redirect to `/login.html` on 401.
+
+**PHASE 22: PASS**
+
+---
+
+## PHASE 23 — Module Testers
+**Status:** COMPLETE — per architecture.md requirement
+
+| File | Tests | Result |
+|---|---|---|
+| `Dataframe/Tester.py` | 16 | 16/16 PASS — CandleBuffer, Compute, Binance, Frame |
+| `Strategy/Tester.py` | 15 | 15/15 PASS — _strategy Rust, evaluate, build_decision, Strategy.py |
+| `Backtest/Tester.py` | 5+1skip | 5/5 PASS — Runner, BacktestResult, Tui, Visualizer (backtest gated behind --full) |
+
+**PHASE 23: PASS**
+
+---
+
+## PHASE 24 — CI + Finalize
+**Status:** COMPLETE — `.github/workflows/ci.yml`, `pyproject.toml`
+
+Added `unit-tests` job to CI: installs deps + maturin build → `pytest tests/ -m "not slow"`. Slow tests excluded from CI (require Binance network + original repo).
+
+`pyproject.toml` markers: `slow = requires Binance network`.
+
+**PHASE 24: PASS**
+
+---
+
+## Final LOC Summary
 | Scope | LOC |
 |---|---|
-| Python production | 1,276 |
+| Python production | 2,855 |
 | Rust production | 320 |
-| **Total** | **1,596** |
+| Tests | 280 |
+| **Total production** | **3,175** |
 | Budget | ≤10,000 |
-| Remaining | 8,404 |
+| Remaining | 6,825 |
+
+## All Phases Complete
+| Phase | Module | Status |
+|---|---|---|
+| 0 | Discovery | ✅ |
+| 1 | Golden Baseline | ✅ |
+| 2 | Skeleton + TOML | ✅ |
+| 4 | Dataframe/Polars | ✅ |
+| 5 | Rust Strategy | ✅ |
+| 6 | GPU Compute | ✅ |
+| 7 | Backtest Engine | ✅ |
+| 8 | Live Engine | ✅ |
+| 9 | Supabase | ✅ |
+| 10 | Auth | ✅ |
+| 11 | Credential Encryption | ✅ |
+| 12 | Risk Management | ✅ |
+| 13 | Reconciliation | ✅ |
+| 14 | Candle Buffer | ✅ |
+| 15 | Storage Repos | ✅ |
+| 16 | Worker Leases | ✅ |
+| 17 | Gap Recovery | ✅ |
+| 18 | Paper Engine | ✅ |
+| 19 | Test Suite | ✅ |
+| 20 | Auth + Accounts API | ✅ |
+| 21 | Positions + Equity API | ✅ |
+| 22 | Dashboard HTML | ✅ |
+| 23 | Module Testers | ✅ |
+| 24 | CI + Finalize | ✅ |
