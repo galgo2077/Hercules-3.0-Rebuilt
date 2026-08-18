@@ -10,8 +10,10 @@ from typing import Any
 
 import websockets
 
+from Dataframe.CandleBuffer import CandleBuffer
 from Live._client import BinanceClient
 from Live.Positions import PositionTracker
+from Live.Risk import RiskState, check_entry, on_entry, on_exit, size_trade
 
 log = logging.getLogger(__name__)
 
@@ -21,6 +23,7 @@ _PORTFOLIO_TOML = _ROOT / "Portfolio.toml"
 
 _DEMO_REST = "https://testnet.binancefuture.com"
 _DEMO_WS = "wss://stream.binancefuture.com/stream"
+_MIN_BARS = 200
 
 
 def _load_config() -> tuple[dict, dict]:
@@ -37,20 +40,27 @@ def _stream_url(assets: list[str], interval: str) -> str:
 
 
 class DemoEngine:
-    """Runs strategy → execute loop against Binance demo futures."""
+    """Runs strategy → risk → execute loop against Binance demo futures."""
 
     def __init__(self) -> None:
         self._live, self._pf = _load_config()
-        self._assets: list[str] = list(self._pf.get("assets", {}).keys())
+        self._assets: list[str] = list(self._pf.get("allocation", {}).keys())
         self._interval: str = self._live.get("interval", "1h")
         self._reconnect: int = int(self._live.get("reconnect_delay_s", 5))
         self._tracker = PositionTracker()
+        self._buffer = CandleBuffer(capacity=600)
         self._running = False
-        self._ohlcv_buf: dict[str, list[dict]] = {a: [] for a in self._assets}
+        cash = float(self._pf.get("initial_cash", 100.0))
+        self._risk = RiskState(
+            initial_equity=cash,
+            current_equity=cash,
+            max_concurrent_shorts=int(self._pf.get("max_concurrent_shorts", 5)),
+        )
 
-    def _allocations(self, initial_cash: float) -> dict[str, float]:
-        weights = self._pf.get("weights", {})
-        return {a: initial_cash * weights.get(a, 0.0) for a in self._assets}
+    def _allocations(self) -> dict[str, float]:
+        weights = self._pf.get("allocation", {})
+        cash = self._risk.current_equity
+        return {a: cash * float(weights.get(a, 0.0)) for a in self._assets}
 
     def _on_closed_candle(self, client: BinanceClient, msg: dict[str, Any]) -> None:
         from Dataframe.Frame import build
@@ -58,57 +68,62 @@ class DemoEngine:
 
         stream = msg.get("stream", "")
         asset = stream.split("@")[0].upper() + "USDT" if "@" in stream else ""
-        k = msg.get("data", {}).get("k", {})
-        if not k.get("x") or asset not in self._assets:
+        if asset not in self._assets:
             return
 
-        self._ohlcv_buf[asset].append({
-            "timestamp": k["t"], "open": float(k["o"]), "high": float(k["h"]),
-            "low": float(k["l"]), "close": float(k["c"]), "volume": float(k["v"]),
-            "asset": asset,
-        })
-        if len(self._ohlcv_buf[asset]) < 200:
+        if not self._buffer.ingest_ws(asset, msg):
+            return  # not closed
+        if not self._buffer.ready(asset, _MIN_BARS):
             return
 
         import polars as pl
-        ohlcv = pl.DataFrame(self._ohlcv_buf[asset]).with_columns(
+        rows = self._buffer.to_dicts(asset)
+        ohlcv = pl.DataFrame(rows).with_columns(
             pl.from_epoch(pl.col("timestamp"), time_unit="ms").alias("timestamp")
         )
         frame = build(ohlcv)
-        cash = float(self._pf.get("initial_cash", 100.0))
-        allocs = self._allocations(cash)
+        allocs = self._allocations()
         exposures = self._tracker.as_exposure_dict(allocs)
         decisions = evaluate(frame.filter(pl.col("asset") == asset), asset_exposures=exposures)
 
         last = decisions.filter(pl.col("asset") == asset).sort("timestamp").tail(1)
         if last.is_empty():
             return
-
-        row = last.row(0, named=True)
-        self._execute(client, row, allocs)
+        self._execute(client, last.row(0, named=True), allocs)
 
     def _execute(self, client: BinanceClient, row: dict, allocs: dict[str, float]) -> None:
         from Live.Orders import Long, Short
 
         asset = row["asset"]
         action = row.get("action", "Hold")
-        allocated = allocs.get(asset, 0.0)
-        leverage = int(self._pf.get("leverage", {}).get(asset, 1))
+        side = row.get("side", "")
+        leverage = int(self._pf.get("leverage", 1))
+        amount = size_trade(self._risk.current_equity, asset, portfolio=self._pf)
 
-        if action == "Entry" and row.get("side") == "Long":
-            log.info("DEMO ENTRY LONG %s %.2f USDT", asset, allocated)
-            Long.enter(client, asset, allocated, leverage)
-        elif action == "Entry" and row.get("side") == "Short":
-            log.info("DEMO ENTRY SHORT %s %.2f USDT", asset, allocated)
-            Short.enter(client, asset, allocated, leverage)
+        if action == "Entry":
+            ex_side = "LONG" if side == "Long" else "SHORT"
+            allowed, reason = check_entry(self._risk, ex_side, asset, amount)
+            if not allowed:
+                log.warning("entry blocked %s %s: %s", asset, ex_side, reason)
+                return
+            if side == "Long":
+                log.info("DEMO ENTRY LONG %s %.2f USDT", asset, amount)
+                Long.enter(client, asset, amount, leverage)
+            else:
+                log.info("DEMO ENTRY SHORT %s %.2f USDT", asset, amount)
+                Short.enter(client, asset, amount, leverage)
+            on_entry(self._risk, ex_side)
+
         elif row.get("exit_required"):
             pos = self._tracker.get(asset)
             if pos.side == "LONG":
                 log.info("DEMO EXIT LONG %s", asset)
                 Long.exit(client, asset)
+                on_exit(self._risk, "LONG")
             elif pos.side == "SHORT":
                 log.info("DEMO EXIT SHORT %s", asset)
                 Short.exit(client, asset)
+                on_exit(self._risk, "SHORT")
 
     async def _listen(self) -> None:
         url = _stream_url(self._assets, self._interval)
