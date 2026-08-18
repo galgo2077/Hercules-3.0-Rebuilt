@@ -1,0 +1,19 @@
+[package]
+name = "hercules-strategy"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "_strategy"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+pyo3 = { version = "0.24", features = ["extension-module"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+approx = "0.5"
+
+[features]
+default = []

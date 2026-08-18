@@ -1,0 +1,10 @@
+# Server — dashboard host/port and non-secret Supabase config.
+# Supabase URL and anon key may live here (public values only).
+# Service-role key belongs in .env only.
+
+host = "127.0.0.1"
+port = 8765
+mode = "paper"      # paper | live
+
+log_file       = ".hercules/run.log"
+kill_switch    = ".hercules/kill-switch.json"

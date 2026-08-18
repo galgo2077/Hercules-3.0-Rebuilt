@@ -1,0 +1,13 @@
+.env
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+Strategy/Rust/target/
+*.so
+*.pyd
+.hercules/
+*.sqlite3
+cache/

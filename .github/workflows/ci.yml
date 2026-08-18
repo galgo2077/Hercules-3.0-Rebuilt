@@ -1,0 +1,98 @@
+name: CI
+
+on:
+  push:
+    branches: [development, "rebuild/**"]
+  pull_request:
+    branches: [development]
+
+jobs:
+  rust:
+    name: Rust
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: fmt
+        working-directory: Strategy/Rust
+        run: cargo fmt --check
+      - name: clippy
+        working-directory: Strategy/Rust
+        run: cargo clippy -- -D warnings
+      - name: test
+        working-directory: Strategy/Rust
+        run: cargo test --release
+
+  python-rust-integration:
+    name: Python + Rust integration
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install maturin + deps
+        run: pip install maturin polars rich
+      - name: Build native module
+        run: maturin develop --manifest-path Strategy/Rust/Cargo.toml
+      - name: Import test
+        run: |
+          python -c "
+          import sys; sys.path.insert(0, '.')
+          import _strategy
+          inp = _strategy.StrategyInput(
+              timestamp_ms=0, asset='BTCUSDT', direction='BULLISH',
+              volatility_regime=2, final_signal=1, short_trend_similarity=0.8,
+              slope=0.1, bars_in_direction=100, bars_bearish=0, warmup_complete=True,
+          )
+          ls, ss = _strategy.evaluate(inp)
+          assert ls == 1.0 and ss == 0.0
+          r = _strategy.build_decision(0, 'BTCUSDT', ls, ss, 0.0, 0.15, 0.15)
+          assert r.action == 'Entry' and r.side == 'Long' and r.entry_allowed
+          print('PASS')
+          "
+
+  config:
+    name: TOML config validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Validate all TOMLs load
+        run: |
+          python -c "
+          import sys, tomllib
+          sys.path.insert(0, '.')
+          for f in ['Strategy','Portfolio','Dataframe','Backtest','Live','Server','Security']:
+              with open(f'{f}.toml','rb') as fh: tomllib.load(fh)
+              print(f'  {f}.toml OK')
+          from SharedParams.Config import load
+          cfg = load()
+          w = cfg.portfolio.weights
+          assert abs(sum(w.values()) - 1.0) < 1e-9, 'weights must sum to 1'
+          print('PASS')
+          "
+      - name: No JSON5 present
+        run: |
+          count=\$(find . -name '*.json5' | grep -v '.git' | wc -l)
+          echo \"json5 files found: \$count\"
+          test \"\$count\" -eq 0 || (echo 'FAIL: json5 files present' && exit 1)
+
+  loc:
+    name: Production LOC gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Count production LOC
+        run: |
+          count=\$(find . -name '*.py' -o -name '*.rs' \
+            | grep -v __pycache__ | grep -v '.venv' | grep -v 'target/' \
+            | grep -v '/tests/' | grep -v 'test_' \
+            | xargs wc -l 2>/dev/null | tail -1 | awk '{print \$1}')
+          echo "Production LOC: \$count"
+          test "\$count" -le 10000 || (echo "FAIL: LOC \$count > 10000" && exit 1)

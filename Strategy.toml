@@ -1,0 +1,61 @@
+# Strategy — indicator params, gates, thresholds.
+# Migrated from Strategy/params.json5 + Strategy/assets/*/params.json5.
+
+[conditions]
+minimum_volatility_regime      = 1
+long_entry_minimum_candles     = 0
+short_trend_window             = 5
+short_entry_minimum_bearish_bars = 0
+require_slope_confirmation     = true
+bullish_direction              = "BULLISH"
+bearish_direction              = "BEARISH"
+sideways_direction             = "SIDEWAYS"
+buy_indicator_signal           = "buy"
+sell_indicator_signal          = "sell"
+
+# ── Per-asset overrides ───────────────────────────────────────────────────────
+
+[assets.BTCUSDT]
+rdma_fast_half_life   = 100
+rdma_medium_half_life = 380
+rdma_slow_half_life   = 700
+slope_lookback        = 10
+min_direction_bars    = 97
+stop_loss_pct         = 0.06
+take_profit_pct       = 0.03
+checkpoint_trail_pct  = 0.008
+short_trailing_stop_pct = 0.018
+trade_size_pct        = 0.15
+leverage              = 8.0
+
+[assets.ETHUSDT]
+rdma_medium_half_life = 380
+rdma_slow_half_life   = 650
+slope_lookback        = 13
+min_direction_bars    = 96
+long_entry_minimum_candles    = 48
+short_trend_window            = 8
+short_entry_minimum_bearish_bars = 8
+take_profit_pct       = 0.03
+checkpoint_trail_pct  = 0.01
+
+[assets.XRPUSDT]
+rdma_fast_half_life   = 40
+rdma_medium_half_life = 400
+rdma_slow_half_life   = 1050
+slope_lookback        = 12
+min_direction_bars    = 150
+minimum_volatility_regime        = 3
+long_entry_minimum_candles       = 72
+short_trend_window               = 72
+short_entry_minimum_bearish_bars = 72
+signal_minimum_overall_confidence = 0.55
+signal_minimum_signal_score       = 0.35
+
+[assets.SOLUSDT]
+minimum_volatility_regime        = 1
+long_entry_minimum_candles       = 48
+short_trend_window               = 48
+short_entry_minimum_bearish_bars = 48
+signal_minimum_overall_confidence = 0.35
+signal_minimum_signal_score       = 0.45

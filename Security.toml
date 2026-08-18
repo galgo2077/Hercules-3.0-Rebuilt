@@ -1,0 +1,15 @@
+# Security — non-secret policy values. No credentials here.
+
+session_ttl_seconds              = 3600
+password_recovery_ttl_seconds    = 600
+password_recovery_max_attempts   = 5
+password_recovery_resend_cooldown_seconds = 60
+
+rate_limit_login_per_minute      = 10
+max_request_bytes                = 1048576   # 1 MiB
+
+# Origins allowed by CORS middleware.
+# Add production domain after deployment.
+allowed_origins = ["http://localhost:8765", "http://127.0.0.1:8765"]
+allowed_hosts   = ["localhost", "127.0.0.1"]
+secure_cookie   = false   # set true behind HTTPS/Cloudflare

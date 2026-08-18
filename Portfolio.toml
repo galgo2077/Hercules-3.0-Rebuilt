@@ -1,0 +1,19 @@
+# Portfolio — allocation, sizing, leverage, position constraints.
+# Single source of truth for both Backtest and Live.
+
+leverage           = 15.0
+trade_size_pct     = 0.30
+
+take_profit_pct          = 0.025
+checkpoint_trail_pct     = 0.012
+short_trailing_stop_pct  = 0.015
+# stop_loss_pct disabled globally; per-asset override in Strategy.toml
+
+short_exit_on_bullish_trend = true
+max_concurrent_shorts       = 5
+
+[allocation]
+BTCUSDT = 0.60
+ETHUSDT = 0.10
+SOLUSDT = 0.20
+XRPUSDT = 0.10

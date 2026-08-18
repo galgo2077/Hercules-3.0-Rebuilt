@@ -1,0 +1,5 @@
+# Dataframe — interval, warmup, frame-level settings.
+# Provider-independent. Binance-specific settings stay in Dataframe/Binance.py.
+
+interval     = "1h"
+warmup_bars  = 1200    # bars before strategy signals are valid
