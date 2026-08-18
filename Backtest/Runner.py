@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import tempfile
+import threading
 import tomllib
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -117,17 +120,47 @@ def run(
             config_file.write(config_json)
             config_path = config_file.name
 
-        # Import and run original's backtest
+        # Import original modules
+        import Backtest.Engine.backtester as _bt  # type: ignore
         from Backtest.Engine.backtester import load_backtest_frames  # type: ignore
         from Backtest.Engine.ohlcv_cache import CachingMariaAPI  # type: ignore
 
-        cache_dir = _ROOT / ".cache" / "ohlcv"
-        frames = load_backtest_frames(
-            config_path,
-            progress=progress,
-            monte_carlo_progress=monte_carlo_progress,
-            maria_api=CachingMariaAPI(cache_dir=cache_dir),
-        )
+        # ── Parallel strategy compute ──────────────────────────────────────────
+        # Monkeypatch build_final_strategy_dataframe in the backtester module so
+        # load_backtest_frames calls the parallel version transparently.
+        # Each asset slice is computed independently → no cross-asset leakage,
+        # identical results to sequential execution.
+        _seq_build = _bt.build_final_strategy_dataframe
+        _prog_lock = threading.Lock()
+
+        def _par_build(ohlcv, config=None, progress=None):  # type: ignore[no-untyped-def]
+            asset_list = ohlcv["asset"].unique().to_list()
+            if len(asset_list) <= 1:
+                return _seq_build(ohlcv, config=config, progress=progress)
+            n = min(len(asset_list), os.cpu_count() or 4)
+
+            def _one(asset: str) -> pl.DataFrame:
+                f = _seq_build(ohlcv.filter(pl.col("asset") == asset), config=config)
+                if progress is not None:
+                    with _prog_lock:
+                        progress(asset)
+                return f
+
+            with ThreadPoolExecutor(max_workers=n, thread_name_prefix="bt_strat") as pool:
+                parts = list(pool.map(_one, asset_list))
+            return pl.concat(parts).sort("timestamp", "asset")
+
+        _bt.build_final_strategy_dataframe = _par_build
+        try:
+            cache_dir = _ROOT / ".cache" / "ohlcv"
+            frames = load_backtest_frames(
+                config_path,
+                progress=progress,
+                monte_carlo_progress=monte_carlo_progress,
+                maria_api=CachingMariaAPI(cache_dir=cache_dir),
+            )
+        finally:
+            _bt.build_final_strategy_dataframe = _seq_build
 
         trades = frames.trades
         if "side" not in trades.columns and "type" in trades.columns:

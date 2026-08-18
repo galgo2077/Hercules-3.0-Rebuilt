@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import os
 import sys
+import threading
 import tomllib
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import polars as pl
@@ -46,14 +49,12 @@ _SIGNAL_TOML_KEYS = {
 
 
 def _build_config() -> dict:
-    """Build config dict matching the original backtester's Strategy_by_asset format."""
     with _STRATEGY_TOML.open("rb") as f:
         cfg = tomllib.load(f)
 
     global_conditions = cfg.get("conditions", {})
     asset_params = cfg.get("assets", {})
 
-    # base global conditions — same defaults as strategy.py disk config
     base = {
         "minimum_volatility_regime": global_conditions.get("minimum_volatility_regime", 1),
         "long_entry_minimum_candles": global_conditions.get("long_entry_minimum_candles", 0),
@@ -73,14 +74,12 @@ def _build_config() -> dict:
 
     for asset in known_assets:
         params = asset_params.get(asset, {})
-        # merge per-asset condition overrides onto base (mirrors resolve_strategy_params)
         conditions = dict(base)
         for field in _ALL_CONDITION_FIELDS:
             if field in params:
                 conditions[field] = params[field]
         strategy_by_asset[asset] = {"enabled": True, "conditions": conditions}
 
-        # signal threshold overrides (dot-notation for _apply_overrides)
         signal_overrides = {dot: params[toml_key] for toml_key, dot in _SIGNAL_TOML_KEYS.items() if toml_key in params}
         if signal_overrides:
             indicator_by_asset[asset] = {"signal": signal_overrides}
@@ -94,7 +93,6 @@ def _build_config() -> dict:
 def _ensure_original_on_path() -> None:
     rebuild = str(_ORIGINAL_REPO.parent / "hercules 3.0 rebuilt")
     original = str(_ORIGINAL_REPO)
-    # original appended so rebuild modules resolve first (avoids package name collisions)
     if original not in sys.path:
         sys.path.append(original)
     if rebuild not in sys.path:
@@ -104,23 +102,55 @@ def _ensure_original_on_path() -> None:
         sys.path.insert(0, rebuild)
 
 
+def _validate(frame: pl.DataFrame) -> None:
+    missing = set(FRAME_COLUMNS) - set(frame.columns)
+    if missing:
+        raise RuntimeError(f"Frame pipeline missing columns: {sorted(missing)}")
+
+
 def build(
     ohlcv: pl.DataFrame,
     progress: Callable[[str], None] | None = None,
+    *,
+    n_workers: int | None = None,
 ) -> pl.DataFrame:
     """Run the full Hercules strategy pipeline and return Hercules Frame.
+
+    Multi-asset input processed in parallel (one thread per asset).
+    Each asset sees only its own data — no cross-asset leakage.
 
     Columns produced: timestamp, open, high, low, close, volume, asset,
     direction, short_trend_similarity, final_signal (Int8), slope.
     """
     _ensure_original_on_path()
+    # Import in main thread before spawning workers — keeps sys.path safe.
     from Strategy.getData import build_final_strategy_dataframe  # type: ignore[import]
 
     config = _build_config()
-    frame = build_final_strategy_dataframe(ohlcv, config=config, progress=progress)
+    assets = ohlcv["asset"].unique().to_list()
 
-    missing = set(FRAME_COLUMNS) - set(frame.columns)
-    if missing:
-        raise RuntimeError(f"Frame pipeline missing columns: {sorted(missing)}")
+    if len(assets) <= 1:
+        frame = build_final_strategy_dataframe(ohlcv, config=config, progress=progress)
+        _validate(frame)
+        return frame.select(*FRAME_COLUMNS)
 
+    # Multi-asset: each asset slice is independent — split, compute in parallel, concat.
+    n = min(len(assets), n_workers or os.cpu_count() or 4)
+    lock = threading.Lock()
+
+    def _build_one(asset: str) -> pl.DataFrame:
+        result = build_final_strategy_dataframe(
+            ohlcv.filter(pl.col("asset") == asset),
+            config=config,
+        )
+        if progress is not None:
+            with lock:
+                progress(asset)
+        return result
+
+    with ThreadPoolExecutor(max_workers=n, thread_name_prefix="frame") as pool:
+        parts = list(pool.map(_build_one, assets))
+
+    frame = pl.concat(parts).sort("timestamp", "asset")
+    _validate(frame)
     return frame.select(*FRAME_COLUMNS)

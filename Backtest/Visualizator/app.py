@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import socket
 import threading
 import webbrowser
@@ -156,6 +157,8 @@ def launch_visualizer(strategy: pl.DataFrame, trades: pl.DataFrame, equity: pl.D
     @app.callback(Output("equity", "figure"), Input("equity-asset", "value"))
     def update_equity(asset: str) -> go.Figure:
         return build_equity_figure(equity.filter(pl.col("asset") == asset))
+
+    logging.getLogger("werkzeug").setLevel(logging.ERROR)
 
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
