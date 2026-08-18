@@ -43,15 +43,23 @@ jobs:
           python -c "
           import sys; sys.path.insert(0, '.')
           import _strategy
+          # basic long entry
           inp = _strategy.StrategyInput(
               timestamp_ms=0, asset='BTCUSDT', direction='BULLISH',
-              volatility_regime=2, final_signal=1, short_trend_similarity=0.8,
-              slope=0.1, bars_in_direction=100, bars_bearish=0, warmup_complete=True,
+              final_signal=1, short_trend_similarity=0.8,
+              slope=0.1, warmup_complete=True,
           )
-          ls, ss = _strategy.evaluate(inp)
+          ls, ss = _strategy.evaluate(inp, 0, True)
           assert ls == 1.0 and ss == 0.0
           r = _strategy.build_decision(0, 'BTCUSDT', ls, ss, 0.0, 0.15, 0.15)
           assert r.action == 'Entry' and r.side == 'Long' and r.entry_allowed
+          # same-side no-reentry
+          ls2, ss2 = _strategy.evaluate(inp, 1, True)
+          assert ls2 == 0.0 and ss2 == 0.0
+          # slope gate blocks long with negative slope
+          inp2 = _strategy.StrategyInput(0, 'BTCUSDT', 'BULLISH', 1, 0.5, -0.05, True)
+          ls3, ss3 = _strategy.evaluate(inp2, 0, True)
+          assert ls3 == 0.0
           print('PASS')
           "
 
