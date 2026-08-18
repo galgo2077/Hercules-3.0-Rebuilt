@@ -1,5 +1,4 @@
 """CandleBuffer: ingest, dedup, ready gate, health, WS parse, reset."""
-import pytest
 
 from Dataframe.CandleBuffer import CandleBuffer
 

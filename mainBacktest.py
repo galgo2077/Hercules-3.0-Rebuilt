@@ -1,7 +1,8 @@
 """Backtest entry point — runs engine, shows TUI progress and results."""
-from SharedParams.Config import load
+
 from Backtest.Runner import run
 from Backtest.Tui import BacktestProgress, print_results
+from SharedParams.Config import load
 
 
 def main() -> None:

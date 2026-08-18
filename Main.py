@@ -1,11 +1,11 @@
 """Live entry point — initialise services and start the server."""
-import os
+
 from dotenv import load_dotenv
 
-load_dotenv()
-
-from SharedParams.Config import load
 from Live.Server import main as serve
+from SharedParams.Config import load
+
+load_dotenv()
 
 
 def main() -> None:

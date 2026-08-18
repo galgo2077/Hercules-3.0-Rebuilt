@@ -1,8 +1,10 @@
 """AES-GCM roundtrip and tamper-detection tests."""
+
 import base64
 import os
 
 import pytest
+from cryptography.exceptions import InvalidTag
 
 os.environ.setdefault("HERCULES_MASTER_KEY", base64.b64encode(os.urandom(32)).decode())
 
@@ -23,14 +25,14 @@ def test_generate_key_length():
 def test_tampered_ciphertext_rejected():
     blob = encrypt("hello")
     bad = base64.b64encode(b"\x00" * 16).decode()
-    with pytest.raises(Exception):
+    with pytest.raises(InvalidTag):
         decrypt(bad, blob["nonce"], blob["tag"])
 
 
 def test_tampered_tag_rejected():
     blob = encrypt("hello")
     bad_tag = base64.b64encode(b"\xff" * 16).decode()
-    with pytest.raises(Exception):
+    with pytest.raises(InvalidTag):
         decrypt(blob["ciphertext"], blob["nonce"], bad_tag)
 
 

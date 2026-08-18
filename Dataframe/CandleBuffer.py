@@ -1,8 +1,9 @@
 """Per-asset rolling candle buffer — ingest closed candles, gate strategy-ready."""
+
 from __future__ import annotations
 
 from collections import deque
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
@@ -42,6 +43,10 @@ class CandleBuffer:
         self._capacity = capacity
         self._buf: dict[str, deque[Candle]] = {}
 
+    @property
+    def capacity(self) -> int:
+        return self._capacity
+
     def _ensure(self, asset: str) -> deque[Candle]:
         if asset not in self._buf:
             self._buf[asset] = deque(maxlen=self._capacity)
@@ -71,11 +76,7 @@ class CandleBuffer:
         return list(self._buf.get(asset, []))
 
     def to_dicts(self, asset: str) -> list[dict[str, Any]]:
-        return [
-            {"timestamp": c.timestamp_ms, "open": c.open, "high": c.high,
-             "low": c.low, "close": c.close, "volume": c.volume, "asset": c.asset}
-            for c in self._buf.get(asset, [])
-        ]
+        return [{"timestamp": c.timestamp_ms, "open": c.open, "high": c.high, "low": c.low, "close": c.close, "volume": c.volume, "asset": c.asset} for c in self._buf.get(asset, [])]
 
     def health(self, asset: str) -> dict[str, Any]:
         buf = self._buf.get(asset, deque())

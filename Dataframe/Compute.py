@@ -1,7 +1,9 @@
 """GPU-accelerated batch computations — cupy when available, numpy fallback."""
+
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from importlib import import_module
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
@@ -9,14 +11,17 @@ if TYPE_CHECKING:
     import numpy.typing as npt
 
 _GPU = False
+cp: Any | None = None
 try:
-    import cupy as cp  # type: ignore[import]
-    cp.cuda.Device(0).use()
+    _cupy = import_module("cupy")
+
+    _cupy.cuda.Device(0).use()
+    cp = _cupy
     _GPU = True
 except Exception:
-    cp = None  # type: ignore[assignment]
+    cp = None
 
-_xp = cp if _GPU else np
+_xp: Any = cp if _GPU else np
 
 
 def backend() -> str:
@@ -30,7 +35,11 @@ def to_device(arr: "npt.ArrayLike") -> "npt.NDArray":
 
 
 def to_numpy(arr: "npt.NDArray") -> "npt.NDArray":
-    return cp.asnumpy(arr) if _GPU else np.asarray(arr)
+    if _GPU:
+        if cp is None:
+            raise RuntimeError("CUDA backend selected without CuPy")
+        return cp.asnumpy(arr)
+    return np.asarray(arr)
 
 
 def rolling_mean(values: "npt.ArrayLike", window: int) -> "npt.NDArray":

@@ -93,7 +93,7 @@ jobs:
           import sys, tomllib
           sys.path.insert(0, '.')
           for f in ['Strategy','Portfolio','Dataframe','Backtest','Live','Server','Security']:
-              with open(f'{f}.toml','rb') as fh: tomllib.load(fh)
+              with open(f'SharedData/{f}.toml','rb') as fh: tomllib.load(fh)
               print(f'  {f}.toml OK')
           from SharedParams.Config import load
           cfg = load()

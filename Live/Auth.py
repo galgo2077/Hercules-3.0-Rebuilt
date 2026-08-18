@@ -1,4 +1,5 @@
 """FastAPI dependency — validate Supabase JWT, extract user."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -26,6 +27,8 @@ async def _validate(
     try:
         client = get_service_client()
         resp = client.auth.get_user(creds.credentials)
+        if resp is None:
+            raise ValueError("empty authentication response")
         user = resp.user
         if user is None:
             raise ValueError("null user")
@@ -35,11 +38,9 @@ async def _validate(
             detail="Invalid or expired token",
         ) from exc
 
-    return AuthUser(
-        id=str(user.id),
-        email=user.email,
-        role=user.role or "authenticated",
-    )
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+    return AuthUser(id=str(user.id), email=user.email, role=user.role or "authenticated")
 
 
 # FastAPI dependency — use in route as: user: Annotated[AuthUser, Depends(require_auth)]

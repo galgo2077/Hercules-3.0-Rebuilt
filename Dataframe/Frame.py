@@ -1,18 +1,29 @@
 """Hercules Frame pipeline — delegates to Strategy.getData via original repo bridge."""
+
 from __future__ import annotations
 
 import sys
 import tomllib
+from collections.abc import Callable
 from pathlib import Path
 
 import polars as pl
 
 _ORIGINAL_REPO = Path("/home/void/Documents/Hercules 3.0")
-_STRATEGY_TOML = Path(__file__).parent.parent / "Strategy.toml"
+_STRATEGY_TOML = Path(__file__).parent.parent / "SharedData" / "Strategy.toml"
 
 FRAME_COLUMNS = (
-    "timestamp", "open", "high", "low", "close", "volume",
-    "asset", "direction", "short_trend_similarity", "final_signal", "slope",
+    "timestamp",
+    "open",
+    "high",
+    "low",
+    "close",
+    "volume",
+    "asset",
+    "direction",
+    "short_trend_similarity",
+    "final_signal",
+    "slope",
 )
 
 _ALL_CONDITION_FIELDS = (
@@ -95,7 +106,7 @@ def _ensure_original_on_path() -> None:
 
 def build(
     ohlcv: pl.DataFrame,
-    progress: "((str) -> None) | None" = None,
+    progress: Callable[[str], None] | None = None,
 ) -> pl.DataFrame:
     """Run the full Hercules strategy pipeline and return Hercules Frame.
 

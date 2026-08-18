@@ -1,4 +1,5 @@
 """Binance Demo (testnet) execution engine — candle-driven live loop."""
+
 from __future__ import annotations
 
 import asyncio
@@ -18,8 +19,8 @@ from Live.Risk import RiskState, check_entry, on_entry, on_exit, size_trade
 log = logging.getLogger(__name__)
 
 _ROOT = Path(__file__).resolve().parents[1]
-_LIVE_TOML = _ROOT / "Live.toml"
-_PORTFOLIO_TOML = _ROOT / "Portfolio.toml"
+_LIVE_TOML = _ROOT / "SharedData" / "Live.toml"
+_PORTFOLIO_TOML = _ROOT / "SharedData" / "Portfolio.toml"
 
 _DEMO_REST = "https://testnet.binancefuture.com"
 _DEMO_WS = "wss://stream.binancefuture.com/stream"
@@ -77,10 +78,9 @@ class DemoEngine:
             return
 
         import polars as pl
+
         rows = self._buffer.to_dicts(asset)
-        ohlcv = pl.DataFrame(rows).with_columns(
-            pl.from_epoch(pl.col("timestamp"), time_unit="ms").alias("timestamp")
-        )
+        ohlcv = pl.DataFrame(rows).with_columns(pl.from_epoch(pl.col("timestamp"), time_unit="ms").alias("timestamp"))
         frame = build(ohlcv)
         allocs = self._allocations()
         exposures = self._tracker.as_exposure_dict(allocs)
@@ -146,7 +146,17 @@ class DemoEngine:
     def stop(self) -> None:
         self._running = False
 
+    def _warmup(self) -> None:
+        from Dataframe.OhlcvCache import fetch_warmup
+        log.info("Warmup: fetching %d bars for %s interval=%s", self._buffer.capacity, self._assets, self._interval)
+        df = fetch_warmup(self._assets, self._interval, self._buffer.capacity)
+        for row in df.iter_rows(named=True):
+            ts_ms = int(row["timestamp"].timestamp() * 1000)
+            self._buffer.ingest(row["asset"], {"t": ts_ms, "o": row["open"], "h": row["high"], "l": row["low"], "c": row["close"], "v": row["volume"]}, is_closed=True)
+        log.info("Warmup done: %s", {a: len(self._buffer.get(a)) for a in self._assets})
+
     async def _run_loop(self) -> None:
+        self._warmup()
         while self._running:
             try:
                 await self._listen()

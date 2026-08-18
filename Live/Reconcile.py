@@ -1,11 +1,12 @@
 """Position reconciliation — detect and resolve divergence between local state and exchange."""
+
 from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
 
 from Live._client import BinanceClient
-from Live.Positions import Position, PositionTracker
+from Live.Positions import PositionTracker
 
 log = logging.getLogger(__name__)
 
@@ -15,7 +16,7 @@ _FLAT_THRESHOLD = 0.01  # USDT — positions smaller than this treated as flat
 @dataclass(frozen=True, slots=True)
 class Mismatch:
     asset: str
-    local_side: str   # LONG | SHORT | FLAT
+    local_side: str  # LONG | SHORT | FLAT
     exchange_side: str
     local_usdt: float
     exchange_usdt: float
@@ -43,8 +44,7 @@ def reconcile(
                 local_usdt=local.size_usdt,
                 exchange_usdt=exchange.size_usdt,
             )
-            log.warning("reconcile mismatch %s: local=%s(%.2f) exchange=%s(%.2f)",
-                        asset, local.side, local.size_usdt, exchange.side, exchange.size_usdt)
+            log.warning("reconcile mismatch %s: local=%s(%.2f) exchange=%s(%.2f)", asset, local.side, local.size_usdt, exchange.side, exchange.size_usdt)
             mismatches.append(m)
 
     return mismatches

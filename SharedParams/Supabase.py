@@ -1,4 +1,5 @@
 """Supabase client singleton — reads URL and anon key from environment."""
+
 from __future__ import annotations
 
 import os

@@ -1,4 +1,5 @@
 """Terminal utility — create Supabase Auth user, prompts email + password."""
+
 from __future__ import annotations
 
 import getpass
@@ -26,14 +27,17 @@ def main() -> None:
         sys.exit(1)
 
     from SharedParams.Supabase import get_service_client
+
     client = get_service_client()
 
     try:
-        resp = client.auth.admin.create_user({
-            "email": email,
-            "password": password,
-            "email_confirm": True,
-        })
+        resp = client.auth.admin.create_user(
+            {
+                "email": email,
+                "password": password,
+                "email_confirm": True,
+            }
+        )
         print(f"Created: {resp.user.id} ({resp.user.email})")
     except Exception as exc:
         print(f"Error: {exc}", file=sys.stderr)

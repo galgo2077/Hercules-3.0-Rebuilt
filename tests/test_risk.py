@@ -1,10 +1,6 @@
 """Risk gate: drawdown halt, kill switch, short cap, size calculation."""
-import json
-import os
-import tempfile
-from pathlib import Path
 
-import pytest
+import json
 
 from Live.Risk import (
     RiskState,
@@ -12,7 +8,6 @@ from Live.Risk import (
     kill_active,
     on_entry,
     on_exit,
-    size_trade,
     update_equity,
 )
 

@@ -1,13 +1,43 @@
+# Secrets and local environments
 .env
+.env.*
+!.env.example
 .venv/
+venv/
+ENV/
+
+# Python bytecode, type checks, tests, coverage
 __pycache__/
 *.py[cod]
+*$py.class
+.mypy_cache/
+.pyright/
+.pytest_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+
+# Python packaging and native extensions
 *.egg-info/
-dist/
+.eggs/
 build/
-Strategy/Rust/target/
+dist/
+wheelhouse/
 *.so
 *.pyd
+
+# Rust build output
+Strategy/Rust/target/
+
+# Generated local artifacts
 .hercules/
-*.sqlite3
 cache/
+graphify-out/
+*.sqlite3
+*.db
+
+# Local Obsidian workspace state
+.obsidian/
+Vault/.obsidian/

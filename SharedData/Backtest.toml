@@ -1,0 +1,37 @@
+# Backtest-only settings. Values mirror Hercules 3.0 Backtest/params.json5.
+# Shared leverage, exit rules, and allocation stay in Portfolio.toml + Strategy.toml.
+
+schema_version = 1
+mode = "real"
+
+[data]
+start_date = "2020-04-01T00:00:00Z"
+end_date   = "2026-07-20T00:00:00Z"
+timeframe  = "1h"
+assets     = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT"]
+
+[capital]
+initial_cash        = 100.0
+minimum_free_equity = 10.0
+max_gross_exposure  = 1.0
+allow_short         = true
+
+[execution]
+fee_rate      = 0.001
+slippage_rate = 0.0005
+flip_signals  = false
+
+# Null-valued Hercules 3.0 optional controls are intentionally omitted: their
+# engine defaults are null/false and preserve the same execution behavior.
+
+[monte_carlo]
+simulations       = 10000
+simulation_length = 10000
+seed              = 42
+workers           = 0
+starting_price    = 100.0
+starting_volume   = 1000.0
+annual_drift      = 0.05
+annual_volatility = 0.6
+volume_volatility = 0.35
+ruin_threshold    = 0.0

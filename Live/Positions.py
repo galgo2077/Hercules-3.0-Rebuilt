@@ -1,7 +1,8 @@
 """Position tracking — fetch from exchange, compute signed exposure."""
+
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from Live._client import BinanceClient
 
@@ -41,9 +42,7 @@ class PositionTracker:
             self._positions[symbol] = Position(symbol, side, usdt, entry, mark, upnl)
 
     def get(self, asset: str) -> Position:
-        return self._positions.get(
-            asset, Position(asset, "FLAT", 0.0, 0.0, 0.0, 0.0)
-        )
+        return self._positions.get(asset, Position(asset, "FLAT", 0.0, 0.0, 0.0, 0.0))
 
     def all(self) -> dict[str, Position]:
         return dict(self._positions)

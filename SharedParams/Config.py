@@ -53,7 +53,7 @@ class HerculesConfig:
 
 
 def _load_toml(name: str) -> dict:
-    path = _ROOT / f"{name}.toml"
+    path = _ROOT / "SharedData" / f"{name}.toml"
     if not path.exists():
         raise FileNotFoundError(f"config not found: {path}")
     with path.open("rb") as f:

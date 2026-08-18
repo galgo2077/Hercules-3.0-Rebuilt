@@ -1,4 +1,5 @@
 """Thin Binance USDT-M Futures REST client — HMAC-SHA256 signed requests."""
+
 from __future__ import annotations
 
 import hashlib

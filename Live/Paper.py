@@ -1,4 +1,5 @@
 """Paper trading engine — identical interface to DemoEngine, no real orders."""
+
 from __future__ import annotations
 
 import asyncio
@@ -23,9 +24,9 @@ _MIN_BARS = 200
 
 
 def _load_config() -> tuple[dict, dict]:
-    with (_ROOT / "Live.toml").open("rb") as f:
+    with (_ROOT / "SharedData" / "Live.toml").open("rb") as f:
         live = tomllib.load(f)
-    with (_ROOT / "Portfolio.toml").open("rb") as f:
+    with (_ROOT / "SharedData" / "Portfolio.toml").open("rb") as f:
         pf = tomllib.load(f)
     return live, pf
 
@@ -33,7 +34,7 @@ def _load_config() -> tuple[dict, dict]:
 @dataclass
 class VirtualPosition:
     asset: str
-    side: str        # LONG | SHORT | FLAT
+    side: str  # LONG | SHORT | FLAT
     entry_price: float = 0.0
     size_usdt: float = 0.0
     open_time: float = field(default_factory=time.time)
@@ -80,8 +81,7 @@ class PaperEngine:
         price = self._current_price(asset)
         if price <= 0:
             return
-        self._positions[asset] = VirtualPosition(asset=asset, side=side,
-                                                  entry_price=price, size_usdt=amount)
+        self._positions[asset] = VirtualPosition(asset=asset, side=side, entry_price=price, size_usdt=amount)
         log.info("PAPER %s %s @ %.4f (%.2f USDT)", side, asset, price, amount)
 
     def _exit(self, asset: str) -> None:
@@ -91,19 +91,24 @@ class PaperEngine:
         price = self._current_price(asset)
         raw_pnl = (price - pos.entry_price) / pos.entry_price * pos.size_usdt
         pnl = raw_pnl if pos.side == "LONG" else -raw_pnl
-        self._trades.append(PaperTrade(
-            asset=asset, side=pos.side,
-            entry_price=pos.entry_price, exit_price=price,
-            size_usdt=pos.size_usdt, pnl=pnl,
-        ))
+        self._trades.append(
+            PaperTrade(
+                asset=asset,
+                side=pos.side,
+                entry_price=pos.entry_price,
+                exit_price=price,
+                size_usdt=pos.size_usdt,
+                pnl=pnl,
+            )
+        )
         self._risk.current_equity += pnl
-        log.info("PAPER EXIT %s %s pnl=%.4f equity=%.2f",
-                 asset, pos.side, pnl, self._risk.current_equity)
+        log.info("PAPER EXIT %s %s pnl=%.4f equity=%.2f", asset, pos.side, pnl, self._risk.current_equity)
 
     def _on_closed_candle(self, msg: dict[str, Any]) -> None:
+        import polars as pl
+
         from Dataframe.Frame import build
         from Strategy.Strategy import evaluate
-        import polars as pl
 
         stream = msg.get("stream", "")
         asset = stream.split("@")[0].upper() + "USDT" if "@" in stream else ""
@@ -114,16 +119,9 @@ class PaperEngine:
         if not self._buffer.ready(asset, _MIN_BARS):
             return
 
-        ohlcv = pl.DataFrame(self._buffer.to_dicts(asset)).with_columns(
-            pl.from_epoch(pl.col("timestamp"), time_unit="ms").alias("timestamp")
-        )
-        allocs = {
-            a: self._risk.current_equity * float(self._pf.get("allocation", {}).get(a, 0.0))
-            for a in self._assets
-        }
+        ohlcv = pl.DataFrame(self._buffer.to_dicts(asset)).with_columns(pl.from_epoch(pl.col("timestamp"), time_unit="ms").alias("timestamp"))
         pos = self._positions.get(asset)
-        exposure = {asset: (1.0 if pos and pos.side == "LONG"
-                            else -1.0 if pos and pos.side == "SHORT" else 0.0)}
+        exposure = {asset: (1.0 if pos and pos.side == "LONG" else -1.0 if pos and pos.side == "SHORT" else 0.0)}
         frame = build(ohlcv)
         decisions = evaluate(frame.filter(pl.col("asset") == asset), asset_exposures=exposure)
         last = decisions.filter(pl.col("asset") == asset).sort("timestamp").tail(1)
@@ -165,7 +163,17 @@ class PaperEngine:
     def stop(self) -> None:
         self._running = False
 
+    def _warmup(self) -> None:
+        from Dataframe.OhlcvCache import fetch_warmup
+        log.info("Warmup: fetching %d bars for %s interval=%s", self._buffer.capacity, self._assets, self._interval)
+        df = fetch_warmup(self._assets, self._interval, self._buffer.capacity)
+        for row in df.iter_rows(named=True):
+            ts_ms = int(row["timestamp"].timestamp() * 1000)
+            self._buffer.ingest(row["asset"], {"t": ts_ms, "o": row["open"], "h": row["high"], "l": row["low"], "c": row["close"], "v": row["volume"]}, is_closed=True)
+        log.info("Warmup done: %s", {a: len(self._buffer.get(a)) for a in self._assets})
+
     async def _run_loop(self) -> None:
+        self._warmup()
         while self._running:
             try:
                 await self._listen()

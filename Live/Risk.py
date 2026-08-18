@@ -1,9 +1,10 @@
 """Pre-trade risk validation — kill switch, equity gate, sizing, short cap."""
+
 from __future__ import annotations
 
 import json
 import tomllib
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parents[1]
@@ -22,7 +23,7 @@ class RiskState:
 
 
 def _portfolio() -> dict:
-    with (_ROOT / "Portfolio.toml").open("rb") as f:
+    with (_ROOT / "SharedData" / "Portfolio.toml").open("rb") as f:
         return tomllib.load(f)
 
 
@@ -49,7 +50,7 @@ def size_trade(
 
 def check_entry(
     state: RiskState,
-    side: str,   # "LONG" | "SHORT"
+    side: str,  # "LONG" | "SHORT"
     asset: str,
     amount_usdt: float,
 ) -> tuple[bool, str]:

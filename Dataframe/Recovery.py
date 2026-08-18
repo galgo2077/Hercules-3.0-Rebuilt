@@ -1,4 +1,5 @@
 """Gap detection and fill for CandleBuffer after WebSocket reconnect."""
+
 from __future__ import annotations
 
 import time

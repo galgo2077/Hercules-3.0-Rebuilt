@@ -1,4 +1,5 @@
 """Binance Real production execution engine — same loop as Demo, production endpoints."""
+
 from __future__ import annotations
 
 import asyncio
@@ -15,7 +16,7 @@ from Live.Demo import DemoEngine
 log = logging.getLogger(__name__)
 
 _ROOT = Path(__file__).resolve().parents[1]
-_LIVE_TOML = _ROOT / "Live.toml"
+_LIVE_TOML = _ROOT / "SharedData" / "Live.toml"
 
 _REAL_REST = "https://fapi.binance.com"
 _REAL_WS = "wss://fstream.binance.com/stream"

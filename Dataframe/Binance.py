@@ -1,4 +1,5 @@
 """Binance Spot REST OHLCV fetcher."""
+
 from __future__ import annotations
 
 import json
@@ -8,7 +9,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timezone
 from datetime import time as dtime
 from threading import Lock
-from typing import Any
+from typing import Any, cast
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import urlopen
@@ -17,19 +18,40 @@ import polars as pl
 
 KLINES_URL = "https://api.binance.com/api/v3/klines"
 INTERVAL_MS: dict[str, int] = {
-    "1s": 1_000, "1m": 60_000, "3m": 180_000, "5m": 300_000, "15m": 900_000,
-    "30m": 1_800_000, "1h": 3_600_000, "2h": 7_200_000, "4h": 14_400_000,
-    "6h": 21_600_000, "8h": 28_800_000, "12h": 43_200_000, "1d": 86_400_000,
-    "3d": 259_200_000, "1w": 604_800_000, "1M": 2_592_000_000,
+    "1s": 1_000,
+    "1m": 60_000,
+    "3m": 180_000,
+    "5m": 300_000,
+    "15m": 900_000,
+    "30m": 1_800_000,
+    "1h": 3_600_000,
+    "2h": 7_200_000,
+    "4h": 14_400_000,
+    "6h": 21_600_000,
+    "8h": 28_800_000,
+    "12h": 43_200_000,
+    "1d": 86_400_000,
+    "3d": 259_200_000,
+    "1w": 604_800_000,
+    "1M": 2_592_000_000,
 }
 _KLINE_COLS = (
-    "timestamp", "open", "high", "low", "close", "volume", "close_time",
-    "quote_volume", "trades", "taker_buy_base_volume", "taker_buy_quote_volume", "unused",
+    "timestamp",
+    "open",
+    "high",
+    "low",
+    "close",
+    "volume",
+    "close_time",
+    "quote_volume",
+    "trades",
+    "taker_buy_base_volume",
+    "taker_buy_quote_volume",
+    "unused",
 )
-_FLOAT_COLS = ("open", "high", "low", "close", "volume",
-               "quote_volume", "taker_buy_base_volume", "taker_buy_quote_volume")
+_FLOAT_COLS = ("open", "high", "low", "close", "volume", "quote_volume", "taker_buy_base_volume", "taker_buy_quote_volume")
 
-OHLCV_SCHEMA: dict[str, type] = {
+OHLCV_SCHEMA: dict[str, object] = {
     "timestamp": pl.Datetime("ms", "UTC"),
     "asset": pl.String,
     "open": pl.Float64,
@@ -62,7 +84,7 @@ class _RateLimiter:
 
 def _request(query: str) -> list[list[Any]]:
     try:
-        with urlopen(f"{KLINES_URL}?{query}", timeout=30) as r:
+        with urlopen(f"{KLINES_URL}?{query}", timeout=30) as r:  # noqa: S310 -- constant HTTPS endpoint
             payload = json.load(r)
     except HTTPError as e:
         raise BinanceError(f"HTTP {e.code}: {e.read().decode('utf-8', errors='replace')}") from e
@@ -84,8 +106,7 @@ def _fetch_klines(
     rows: list[list[Any]] = []
     cursor = start_ms
     while cursor <= end_ms:
-        params = {"symbol": asset, "interval": interval,
-                  "startTime": cursor, "endTime": end_ms, "limit": 1000}
+        params = {"symbol": asset, "interval": interval, "startTime": cursor, "endTime": end_ms, "limit": 1000}
         limiter.wait()
         page = _request(urlencode(params))
         if not page:
@@ -99,15 +120,17 @@ def _fetch_klines(
         cursor = next_cursor
 
     if not rows:
-        return pl.DataFrame(schema={
-            "asset": pl.String, "timestamp": pl.Datetime("ms", "UTC"),
-            **{c: pl.Float64 for c in ("open", "high", "low", "close", "volume")},
-        })
+        return pl.DataFrame(
+            schema={
+                "asset": pl.String,
+                "timestamp": pl.Datetime("ms", "UTC"),
+                **{c: pl.Float64 for c in ("open", "high", "low", "close", "volume")},
+            }
+        )
 
     frame = (
         pl.DataFrame(rows, schema=_KLINE_COLS, orient="row")
-        .drop("unused", "close_time", "quote_volume", "trades",
-              "taker_buy_base_volume", "taker_buy_quote_volume")
+        .drop("unused", "close_time", "quote_volume", "trades", "taker_buy_base_volume", "taker_buy_quote_volume")
         .with_columns(
             pl.lit(asset).alias("asset"),
             pl.col("timestamp").cast(pl.Datetime("ms", "UTC")),
@@ -142,7 +165,7 @@ def fetch_historical(
 ) -> pl.DataFrame:
     if interval not in INTERVAL_MS:
         raise ValueError(f"unsupported interval: {interval}")
-    symbols = ([assets] if isinstance(assets, str) else list(assets))
+    symbols = [assets] if isinstance(assets, str) else list(assets)
     symbols = list(dict.fromkeys(s.strip().upper() for s in symbols if s.strip()))
     if not symbols:
         raise ValueError("assets must not be empty")
@@ -155,9 +178,19 @@ def fetch_historical(
     limiter = _RateLimiter(requests_per_minute)
 
     def fetch(symbol: str) -> pl.DataFrame:
+        callback = cast(Callable[[str, int], None], progress) if progress else None
+
+        def report(count: int) -> None:
+            if callback is not None:
+                callback(symbol, count)
+
         return _fetch_klines(
-            symbol, interval, start_ms, end_ms, limiter,
-            (lambda n, s=symbol: progress(s, n)) if progress else None,
+            symbol,
+            interval,
+            start_ms,
+            end_ms,
+            limiter,
+            report if callback else None,
         )
 
     with ThreadPoolExecutor(max_workers=len(symbols), thread_name_prefix="binance") as pool:

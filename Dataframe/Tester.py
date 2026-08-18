@@ -1,9 +1,11 @@
 """Dataframe module tester — offline, no network calls."""
-import sys
-import math
-from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
+import math
+
+from Dataframe.Binance import OHLCV_SCHEMA
+from Dataframe.CandleBuffer import CandleBuffer
+from Dataframe.Compute import backend, rolling_mean, rolling_slope
+from Dataframe.Frame import FRAME_COLUMNS, _build_config
 
 passed = 0
 total = 0
@@ -20,7 +22,6 @@ def check(label: str, ok: bool, value) -> None:
 
 
 # ── CandleBuffer ─────────────────────────────────────────────────────────────
-from Dataframe.CandleBuffer import CandleBuffer
 
 buf = CandleBuffer(capacity=500)
 for i in range(250):
@@ -43,7 +44,6 @@ dict_keys = {"timestamp", "open", "high", "low", "close", "volume", "asset"}
 check("CandleBuffer.to_dicts schema", dict_keys.issubset(dicts[0].keys()), set(dicts[0].keys()))
 
 # ── Compute ──────────────────────────────────────────────────────────────────
-from Dataframe.Compute import backend, rolling_mean, rolling_slope
 
 be = backend()
 check("Compute.backend()", be in ("cpu", "cuda"), be)
@@ -61,15 +61,12 @@ check("rolling_slope nans at 0,1", rs_nan2, [rs[0], rs[1]])
 check("rolling_slope values [1,1,1]", rs_vals == [1.0, 1.0, 1.0], rs_vals)
 
 # ── Binance ──────────────────────────────────────────────────────────────────
-import Dataframe.Binance as _binance
-from Dataframe.Binance import OHLCV_SCHEMA
 
 expected_keys = {"timestamp", "asset", "open", "high", "low", "close", "volume"}
 check("Binance import ok", True, "imported")
 check("Binance.OHLCV_SCHEMA keys", expected_keys == set(OHLCV_SCHEMA.keys()), set(OHLCV_SCHEMA.keys()))
 
 # ── Frame ────────────────────────────────────────────────────────────────────
-from Dataframe.Frame import FRAME_COLUMNS, _build_config
 
 check("Frame.FRAME_COLUMNS len=11", len(FRAME_COLUMNS) == 11, len(FRAME_COLUMNS))
 
@@ -77,8 +74,7 @@ cfg = _build_config()
 assets = ("BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT")
 check("Frame._build_config has Strategy_by_asset", "Strategy_by_asset" in cfg, list(cfg.keys()))
 check("Frame._build_config has Indicator_by_asset", "Indicator_by_asset" in cfg, list(cfg.keys()))
-check("Frame._build_config all 4 assets", all(a in cfg["Strategy_by_asset"] for a in assets),
-      list(cfg["Strategy_by_asset"].keys()))
+check("Frame._build_config all 4 assets", all(a in cfg["Strategy_by_asset"] for a in assets), list(cfg["Strategy_by_asset"].keys()))
 
 # ── Summary ───────────────────────────────────────────────────────────────────
 print(f"\n{passed}/{total} passed")

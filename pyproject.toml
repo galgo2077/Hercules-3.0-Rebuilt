@@ -8,20 +8,21 @@ version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = [
     "cryptography>=44.0.0",
+    "dash>=3.0.0",
     "fastapi[standard]>=0.116.0",
     "httpx>=0.28.0",
+    "json5>=0.12.1",
+    "numpy>=2.0.0",
     "polars>=1.0",
     "polars-talib>=0.1.6",
+    "plotly>=6.1.0",
     "rich>=15.0.0",
     "websockets>=15.0",
-    "plotly>=6.1.0",
-    "dash>=3.0.0",
     "supabase>=2.0.0",
     "python-dotenv>=1.0.0",
 ]
 
 [tool.maturin]
-python-source = "."
 module-name = "_strategy"
 manifest-path = "Strategy/Rust/Cargo.toml"
 features = ["pyo3/extension-module"]
@@ -33,7 +34,7 @@ pythonpath = ["."]
 markers = ["slow: requires Binance network and original repo (deselect with -m 'not slow')"]
 
 [tool.ruff]
-line-length = 100
+line-length = 300
 target-version = "py312"
 
 [tool.ruff.lint]
@@ -47,6 +48,7 @@ dev = [
     "maturin>=1.7",
     "hypothesis>=6.0",
     "mypy>=1.15",
+    "pyright>=1.1.411",
     "pytest>=9.1.1",
     "pytest-asyncio>=0.25.0",
     "ruff>=0.11",
