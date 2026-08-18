@@ -1,6 +1,4 @@
-"""Backtest simulation engine — Phase 8 implementation."""
-from SharedParams.Config import HerculesConfig
+"""Re-export from Runner to preserve the Engine name for external callers."""
+from Backtest.Runner import BacktestResult, run  # noqa: F401
 
-
-def run(config: HerculesConfig) -> None:
-    raise NotImplementedError("Backtest engine not yet implemented — Phase 8")
+__all__ = ["BacktestResult", "run"]

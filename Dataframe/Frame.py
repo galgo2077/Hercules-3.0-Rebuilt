@@ -81,9 +81,16 @@ def _build_config() -> dict:
 
 
 def _ensure_original_on_path() -> None:
+    rebuild = str(_ORIGINAL_REPO.parent / "hercules 3.0 rebuilt")
     original = str(_ORIGINAL_REPO)
+    # original appended so rebuild modules resolve first (avoids package name collisions)
     if original not in sys.path:
-        sys.path.insert(0, original)
+        sys.path.append(original)
+    if rebuild not in sys.path:
+        sys.path.insert(0, rebuild)
+    elif sys.path[0] != rebuild:
+        sys.path.remove(rebuild)
+        sys.path.insert(0, rebuild)
 
 
 def build(
