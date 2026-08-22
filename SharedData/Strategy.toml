@@ -73,4 +73,5 @@ long_entry_minimum_candles        = 0
 short_trend_window                = 1
 short_entry_minimum_bearish_bars  = 1
 signal_minimum_overall_confidence = 0.40
-signal_minimum_signal_score       = 0.40
+# Reject marginal SOL signals: they produced a high win rate but negative payoff.
+signal_minimum_signal_score       = 0.42
