@@ -20,6 +20,8 @@ allow_short         = true
 fee_rate      = 0.001
 slippage_rate = 0.0005
 flip_signals  = false
+# Maximum simultaneous entries in the same direction and asset.
+pyramiding_max = 3
 
 # Backtest-only candidate. Live execution settings remain separate.
 [execution_by_asset.BTCUSDT]

@@ -204,12 +204,6 @@ def run(
                 parts = list(pool.map(_one, asset_list))
             return pl.concat(parts).sort("timestamp", "asset")
 
-        _orig_execute = _bt.execute_signals
-
-        def _long_no_exit_execute(strategy, **kwargs):
-            return _orig_execute(strategy, long_no_exit=True, **kwargs)
-
-        _bt.execute_signals = _long_no_exit_execute
         _bt.build_final_strategy_dataframe = _par_build
         _trend_detector.resolve_trend_params = _rebuilt_trend_params
         try:
@@ -222,7 +216,6 @@ def run(
             )
         finally:
             _bt.build_final_strategy_dataframe = _seq_build
-            _bt.execute_signals = _orig_execute
             _trend_detector.resolve_trend_params = _orig_resolve_trend_params
 
         trades = frames.trades
