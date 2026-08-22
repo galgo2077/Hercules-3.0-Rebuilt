@@ -179,6 +179,7 @@ class DemoEngine:
     async def _listen(self) -> None:
         url = _stream_url(self._assets, self._interval)
         with self._client() as client:
+            client.ensure_hedge_mode()  # must run before any order; raises if it fails
             self._tracker.fetch(client)
             async with websockets.connect(url) as ws:
                 async for raw in ws:
