@@ -17,10 +17,16 @@ _TIMEOUT = 10.0
 class BinanceClient:
     """Minimal signed REST client for Binance USDT-M Futures."""
 
-    def __init__(self, base_url: str) -> None:
+    def __init__(
+        self,
+        base_url: str,
+        *,
+        api_key: str | None = None,
+        api_secret: str | None = None,
+    ) -> None:
         self._base = base_url.rstrip("/")
-        self._key = os.environ["BINANCE_API_KEY"]
-        self._secret = os.environ["BINANCE_API_SECRET"].encode()
+        self._key = api_key or os.environ["BINANCE_API_KEY"]
+        self._secret = (api_secret or os.environ["BINANCE_API_SECRET"]).encode()
         self._http = httpx.Client(timeout=_TIMEOUT, headers={"X-MBX-APIKEY": self._key})
 
     def _sign(self, params: dict) -> dict:

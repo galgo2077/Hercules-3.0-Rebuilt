@@ -52,8 +52,8 @@ class HerculesConfig:
     server: ServerConfig
 
 
-def _load_toml(name: str) -> dict:
-    path = _ROOT / "SharedData" / f"{name}.toml"
+def _load_toml(name: str, config_dir: Path | None = None) -> dict:
+    path = (config_dir or (_ROOT / "SharedData")) / f"{name}.toml"
     if not path.exists():
         raise FileNotFoundError(f"config not found: {path}")
     with path.open("rb") as f:
@@ -68,11 +68,11 @@ def _validate_weights(weights: dict[str, float], source: str) -> None:
         raise ValueError(f"{source}: portfolio weights must be non-negative")
 
 
-def load() -> HerculesConfig:
-    portfolio_raw = _load_toml("Portfolio")
-    dataframe_raw = _load_toml("Dataframe")
-    backtest_raw = _load_toml("Backtest")
-    server_raw = _load_toml("Server")
+def load(config_dir: Path | None = None) -> HerculesConfig:
+    portfolio_raw = _load_toml("Portfolio", config_dir)
+    dataframe_raw = _load_toml("Dataframe", config_dir)
+    backtest_raw = _load_toml("Backtest", config_dir)
+    server_raw = _load_toml("Server", config_dir)
 
     weights = portfolio_raw["allocation"]
     _validate_weights(weights, "Portfolio.toml")

@@ -14,13 +14,12 @@ import websockets
 from Dataframe.CandleBuffer import CandleBuffer
 from Live._client import BinanceClient
 from Live.Positions import PositionTracker
-from Live.Risk import RiskState, check_entry, eviction_priority, on_entry, on_exit, size_trade
+from Live.Risk import RiskState, check_entry, eviction_priority, on_entry, on_exit
 
 log = logging.getLogger(__name__)
 
 _ROOT = Path(__file__).resolve().parents[1]
-_LIVE_TOML = _ROOT / "SharedData" / "Live.toml"
-_PORTFOLIO_TOML = _ROOT / "SharedData" / "Portfolio.toml"
+_SHARED = _ROOT / "SharedData"
 
 _DEMO_REST = "https://testnet.binancefuture.com"
 _DEMO_WS = "wss://stream.binancefuture.com/stream"
@@ -28,9 +27,9 @@ _MIN_BARS = 200
 
 
 def _load_config() -> tuple[dict, dict]:
-    with _LIVE_TOML.open("rb") as f:
+    with (_SHARED / "Live.toml").open("rb") as f:
         live = tomllib.load(f)
-    with _PORTFOLIO_TOML.open("rb") as f:
+    with (_SHARED / "Portfolio.toml").open("rb") as f:
         pf = tomllib.load(f)
     return live, pf
 
@@ -41,16 +40,33 @@ def _stream_url(assets: list[str], interval: str) -> str:
 
 
 class DemoEngine:
-    """Runs strategy → risk → execute loop against Binance demo futures."""
+    """Runs strategy → risk → execute loop against Binance demo futures.
 
-    def __init__(self) -> None:
+    api_key / api_secret: Binance credentials for this account.
+                          Falls back to BINANCE_API_KEY/SECRET env vars if omitted.
+    label: identifies this account in log output (e.g. "demo-alice", "real-fund1").
+    """
+
+    def __init__(
+        self,
+        *,
+        api_key: str | None = None,
+        api_secret: str | None = None,
+        label: str = "demo",
+    ) -> None:
+        self._api_key = api_key
+        self._api_secret = api_secret
+        self._label = label
         self._live, self._pf = _load_config()
         self._assets: list[str] = list(self._pf.get("allocation", {}).keys())
         self._interval: str = self._live.get("interval", "1h")
         self._reconnect: int = int(self._live.get("reconnect_delay_s", 5))
+        self._rest_url: str = self._live.get("binance_base_url", _DEMO_REST)
         self._tracker = PositionTracker()
         self._buffer = CandleBuffer(capacity=600)
         self._running = False
+        # per-asset lock: prevents concurrent mutations of shared state per asset
+        self._asset_locks: dict[str, asyncio.Lock] = {a: asyncio.Lock() for a in self._assets}
         cash = float(self._pf.get("initial_cash", 100.0))
         self._risk = RiskState(
             initial_equity=cash,
@@ -58,38 +74,50 @@ class DemoEngine:
             max_concurrent_shorts=int(self._pf.get("max_concurrent_shorts", 5)),
         )
 
+    def _client(self) -> BinanceClient:
+        return BinanceClient(self._rest_url, api_key=self._api_key, api_secret=self._api_secret)
+
     def _allocations(self) -> dict[str, float]:
         weights = self._pf.get("allocation", {})
         cash = self._risk.current_equity
         return {a: cash * float(weights.get(a, 0.0)) for a in self._assets}
 
-    def _on_closed_candle(self, client: BinanceClient, msg: dict[str, Any]) -> None:
-        from Dataframe.Frame import build
-        from Strategy.Strategy import evaluate
-
+    def _dispatch_candle(self, client: BinanceClient, msg: dict[str, Any]) -> None:
+        """Parse message and schedule per-asset processing as a concurrent task."""
         stream = msg.get("stream", "")
         asset = stream.split("@")[0].upper() + "USDT" if "@" in stream else ""
         if asset not in self._assets:
             return
-
         if not self._buffer.ingest_ws(asset, msg):
-            return  # not closed
+            return  # not closed candle
         if not self._buffer.ready(asset, _MIN_BARS):
             return
+        asyncio.ensure_future(self._process_asset(client, asset))
 
+    async def _process_asset(self, client: BinanceClient, asset: str) -> None:
+        """Build frame + evaluate strategy for one asset, then execute. Runs concurrently."""
         import polars as pl
+        from Dataframe.Frame import build
+        from Strategy.Strategy import evaluate
 
         rows = self._buffer.to_dicts(asset)
-        ohlcv = pl.DataFrame(rows).with_columns(pl.from_epoch(pl.col("timestamp"), time_unit="ms").alias("timestamp"))
-        frame = build(ohlcv)
+        ohlcv = pl.DataFrame(rows).with_columns(
+            pl.from_epoch(pl.col("timestamp"), time_unit="ms").alias("timestamp")
+        )
+        # build + evaluate are CPU-heavy (call Rust/original repo); run in thread to not block WS
+        frame = await asyncio.to_thread(build, ohlcv)
         allocs = self._allocations()
         exposures = self._tracker.as_exposure_dict(allocs)
-        decisions = evaluate(frame.filter(pl.col("asset") == asset), asset_exposures=exposures)
+        decisions = await asyncio.to_thread(
+            evaluate, frame.filter(pl.col("asset") == asset), asset_exposures=exposures
+        )
 
         last = decisions.filter(pl.col("asset") == asset).sort("timestamp").tail(1)
         if last.is_empty():
             return
-        self._execute(client, last.row(0, named=True), allocs)
+
+        async with self._asset_locks[asset]:
+            self._execute(client, last.row(0, named=True), allocs)
 
     def _execute(self, client: BinanceClient, row: dict, allocs: dict[str, float]) -> None:
         from Live.Orders import Long, Short
@@ -98,7 +126,7 @@ class DemoEngine:
         asset = row["asset"]
         action = row.get("action", "Hold")
         side = row.get("side", "")
-        risk = asset_risk_params(asset, portfolio_toml=_PORTFOLIO_TOML)
+        risk = asset_risk_params(asset, portfolio_toml=_SHARED / "Portfolio.toml")
         leverage = int(risk["leverage"] or 1)
         weight = float(self._pf.get("allocation", {}).get(asset, 0.0))
         amount = self._risk.current_equity * weight * (risk["trade_size_pct"] or 0.30) * leverage
@@ -150,17 +178,16 @@ class DemoEngine:
 
     async def _listen(self) -> None:
         url = _stream_url(self._assets, self._interval)
-        with BinanceClient(_DEMO_REST) as client:
+        with self._client() as client:
             self._tracker.fetch(client)
             async with websockets.connect(url) as ws:
                 async for raw in ws:
                     if not self._running:
                         break
                     try:
-                        msg = json.loads(raw)
-                        self._on_closed_candle(client, msg)
+                        self._dispatch_candle(client, json.loads(raw))
                     except Exception:
-                        log.exception("Demo candle handler error")
+                        log.exception("[%s] candle dispatch error", self._label)
 
     def start(self) -> None:
         self._running = True
@@ -171,12 +198,12 @@ class DemoEngine:
 
     def _warmup(self) -> None:
         from Dataframe.OhlcvCache import fetch_warmup
-        log.info("Warmup: fetching %d bars for %s interval=%s", self._buffer.capacity, self._assets, self._interval)
+        log.info("[%s] warmup: fetching %d bars for %s interval=%s", self._label, self._buffer.capacity, self._assets, self._interval)
         df = fetch_warmup(self._assets, self._interval, self._buffer.capacity)
         for row in df.iter_rows(named=True):
             ts_ms = int(row["timestamp"].timestamp() * 1000)
             self._buffer.ingest(row["asset"], {"t": ts_ms, "o": row["open"], "h": row["high"], "l": row["low"], "c": row["close"], "v": row["volume"]}, is_closed=True)
-        log.info("Warmup done: %s", {a: len(self._buffer.get(a)) for a in self._assets})
+        log.info("[%s] warmup done: %s", self._label, {a: len(self._buffer.get(a)) for a in self._assets})
 
     async def _run_loop(self) -> None:
         self._warmup()

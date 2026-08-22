@@ -14,7 +14,7 @@ from typing import Any
 import websockets
 
 from Dataframe.CandleBuffer import CandleBuffer
-from Live.Risk import RiskState, check_entry, eviction_priority, on_entry, on_exit, size_trade
+from Live.Risk import RiskState, check_entry, eviction_priority, on_entry, on_exit
 
 log = logging.getLogger(__name__)
 
