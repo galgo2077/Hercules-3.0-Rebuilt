@@ -287,9 +287,13 @@ def _results_views(result: BacktestResult) -> list[DashboardView]:
     if "win_rate" in rows.columns:
         rows = rows.sort("win_rate", descending=True)
     sorted_results = pl.concat([rows, total.unique(subset=["asset"], keep="first", maintain_order=True)])
+    if {"end_money", "roi_usd"} <= set(sorted_results.columns):
+        sorted_results = sorted_results.with_columns(
+            (pl.col("end_money") - pl.col("roi_usd")).alias("initial_equity")
+        )
     columns = [column for column in sorted_results.columns if column not in ("start", "end")]
     percent = tuple(column for column in ("roi", "buy_and_hold_roi", "max_drawdown", "win_rate", "win_longs_pct", "win_shorts_pct", "nlb&h_roi") if column in columns)
-    pnl = tuple(column for column in ("asset", "win_rate", "win_longs_pct", "win_shorts_pct", "end_money", "roi", "roi_usd", "max_drawdown", "max_drawdown_usd") if column in columns)
+    pnl = tuple(column for column in ("asset", "win_rate", "win_longs_pct", "win_shorts_pct", "initial_equity", "end_money", "roi", "roi_usd", "max_drawdown", "max_drawdown_usd") if column in columns)
     risk = tuple(column for column in columns if column not in set(pnl) - {"asset"})
     thresholds = tuple((column, threshold) for column, threshold in (("roi", 0.0), ("roi_usd", 0.0), ("max_drawdown", 0.0), ("max_drawdown_usd", 0.0), ("win_rate", 0.5), ("win_longs_pct", 0.5), ("win_shorts_pct", 0.5)) if column in columns)
     context = f"Range: {results['start'][0]} to {results['end'][0]} | Drawdown: worst intrabar equity fall vs realized-equity peak" if {"start", "end"} <= set(results.columns) else ""
