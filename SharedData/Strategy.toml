@@ -27,6 +27,12 @@ short_trend_window                = 1
 short_entry_minimum_bearish_bars  = 1
 signal_minimum_overall_confidence = 0.40
 signal_minimum_signal_score       = 0.40
+leverage                          = 8.0
+trade_size_pct                    = 0.15
+stop_loss_pct                     = 0.06
+take_profit_pct                   = 0.03
+checkpoint_trail_pct              = 0.008
+short_trailing_stop_pct           = 0.018
 
 [assets.ETHUSDT]
 rdma_fast_half_life               = 25
@@ -40,6 +46,8 @@ short_trend_window                = 1
 short_entry_minimum_bearish_bars  = 1
 signal_minimum_overall_confidence = 0.40
 signal_minimum_signal_score       = 0.40
+take_profit_pct                   = 0.03
+checkpoint_trail_pct              = 0.01
 
 [assets.XRPUSDT]
 rdma_fast_half_life               = 25
