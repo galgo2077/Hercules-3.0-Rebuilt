@@ -10,6 +10,7 @@ import threading
 import tomllib
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
+from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -99,6 +100,9 @@ def _build_config_json5(
         cfg["Strategy_by_asset"] = strategy_by_asset
     if indicator_by_asset:
         cfg["Indicator_by_asset"] = indicator_by_asset
+    execution_by_asset = bt.get("execution_by_asset", {})
+    if execution_by_asset:
+        cfg["execution_by_asset"] = execution_by_asset
 
     # json.dumps produces valid JSON5 (JSON is valid JSON5)
     return json.dumps(cfg, indent=2)
@@ -147,9 +151,33 @@ def run(
             config_path = config_file.name
 
         # Import original modules
+        import Strategy.trend.detector as _trend_detector  # type: ignore
+
         import Backtest.Engine.backtester as _bt  # type: ignore
         from Backtest.Engine.backtester import load_backtest_frames  # type: ignore
         from Backtest.Engine.ohlcv_cache import CachingMariaAPI  # type: ignore
+
+        trend_overrides = _toml("Strategy").get("assets", {})
+        _orig_resolve_trend_params = _trend_detector.resolve_trend_params
+
+        def _rebuilt_trend_params(asset: str | None = None) -> dict:
+            params = deepcopy(_orig_resolve_trend_params(asset))
+            if asset is None:
+                return params
+            override = trend_overrides.get(asset, {})
+            half_lives = (
+                ("rdma_fast_half_life", "rdma_fast"),
+                ("rdma_medium_half_life", "rdma_medium"),
+                ("rdma_slow_half_life", "rdma_slow"),
+            )
+            for source, target in half_lives:
+                if source in override:
+                    params[target]["half_life"] = int(override[source])
+            if "slope_lookback" in override:
+                params["slope"]["lookback"] = int(override["slope_lookback"])
+            if "min_direction_bars" in override:
+                params["detector"]["minimum_direction_bars"] = int(override["min_direction_bars"])
+            return params
 
         # ── Parallel strategy compute ──────────────────────────────────────────
         # Monkeypatch build_final_strategy_dataframe in the backtester module so
@@ -183,6 +211,7 @@ def run(
 
         _bt.execute_signals = _long_no_exit_execute
         _bt.build_final_strategy_dataframe = _par_build
+        _trend_detector.resolve_trend_params = _rebuilt_trend_params
         try:
             cache_dir = _ROOT / ".cache" / "ohlcv"
             frames = load_backtest_frames(
@@ -194,6 +223,7 @@ def run(
         finally:
             _bt.build_final_strategy_dataframe = _seq_build
             _bt.execute_signals = _orig_execute
+            _trend_detector.resolve_trend_params = _orig_resolve_trend_params
 
         trades = frames.trades
         if "side" not in trades.columns and "type" in trades.columns:
