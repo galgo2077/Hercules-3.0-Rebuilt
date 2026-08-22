@@ -56,6 +56,11 @@ class BinanceClient:
         r.raise_for_status()
         return r.json()
 
+    def delete(self, path: str, **params: Any) -> Any:
+        r = self._http.delete(f"{self._base}{path}", params=self._sign(params))
+        r.raise_for_status()
+        return r.json()
+
     def set_leverage(self, symbol: str, leverage: int) -> None:
         self.post("/fapi/v1/leverage", symbol=symbol, leverage=leverage)
 
