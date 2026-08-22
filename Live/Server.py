@@ -48,10 +48,13 @@ def _build_app() -> FastAPI:
     app.include_router(auth_router)
     app.include_router(accounts_router)
 
-    if _STATIC.exists():
-        app.mount("/", StaticFiles(directory=str(_STATIC), html=True), name="static")
-
     return app
+
+
+def _mount_static(application: FastAPI) -> None:
+    """Mount dashboard SPA last — after all API routes — so /api/* is never shadowed."""
+    if _STATIC.exists():
+        application.mount("/", StaticFiles(directory=str(_STATIC), html=True), name="static")
 
 
 app = _build_app()
@@ -174,6 +177,9 @@ async def run_backtest_endpoint(user: _User) -> dict[str, Any]:
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
+
+# Mount SPA last so all /api/* routes registered above are never shadowed.
+_mount_static(app)
 
 
 def main(config: HerculesConfig) -> None:
