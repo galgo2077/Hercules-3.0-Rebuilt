@@ -14,7 +14,7 @@ import websockets
 from Dataframe.CandleBuffer import CandleBuffer
 from Live._client import BinanceClient
 from Live.Positions import PositionTracker
-from Live.Risk import RiskState, check_entry, on_entry, on_exit, size_trade
+from Live.Risk import RiskState, check_entry, eviction_priority, on_entry, on_exit, size_trade
 
 log = logging.getLogger(__name__)
 
@@ -93,25 +93,48 @@ class DemoEngine:
 
     def _execute(self, client: BinanceClient, row: dict, allocs: dict[str, float]) -> None:
         from Live.Orders import Long, Short
+        from Strategy.Strategy import asset_risk_params
 
         asset = row["asset"]
         action = row.get("action", "Hold")
         side = row.get("side", "")
-        leverage = int(self._pf.get("leverage", 1))
-        amount = size_trade(self._risk.current_equity, asset, portfolio=self._pf)
+        risk = asset_risk_params(asset, portfolio_toml=_PORTFOLIO_TOML)
+        leverage = int(risk["leverage"] or 1)
+        weight = float(self._pf.get("allocation", {}).get(asset, 0.0))
+        amount = self._risk.current_equity * weight * (risk["trade_size_pct"] or 0.30) * leverage
 
         if action == "Entry":
             ex_side = "LONG" if side == "Long" else "SHORT"
+            current = self._tracker.get(asset)
+            if ex_side == "SHORT" and current.side == "LONG":
+                # LONGs have no exit — reversal signal suppressed, long continues
+                log.debug("suppress SHORT reversal — LONG active on %s", asset)
+                return
             allowed, reason = check_entry(self._risk, ex_side, asset, amount)
             if not allowed:
                 log.warning("entry blocked %s %s: %s", asset, ex_side, reason)
                 return
+            other_pos = {a: p for a, p in self._tracker.all().items() if not p.is_flat and a != asset}
+            deployed = sum(p.size_usdt for p in other_pos.values())
+            free = self._risk.current_equity - deployed
+            if amount > free and other_pos:
+                victim = eviction_priority(other_pos)[0]
+                victim_side = other_pos[victim].side
+                log.info("evict %s (%s) → free capital for %s %s", victim, victim_side, ex_side, asset)
+                if victim_side == "LONG":
+                    Long.exit(client, victim)
+                else:
+                    Short.exit(client, victim)
+                on_exit(self._risk, victim_side)
             if side == "Long":
-                log.info("DEMO ENTRY LONG %s %.2f USDT", asset, amount)
+                log.info("DEMO ENTRY LONG %s %.2f USDT lev=%d", asset, amount, leverage)
                 Long.enter(client, asset, amount, leverage)
             else:
-                log.info("DEMO ENTRY SHORT %s %.2f USDT", asset, amount)
-                Short.enter(client, asset, amount, leverage)
+                log.info("DEMO ENTRY SHORT %s %.2f USDT lev=%d sl=%.3f tp=%.3f",
+                         asset, amount, leverage, risk["stop_loss_pct"] or 0, risk["take_profit_pct"] or 0)
+                Short.enter(client, asset, amount, leverage,
+                            stop_loss_pct=risk["stop_loss_pct"],
+                            take_profit_pct=risk["take_profit_pct"])
             on_entry(self._risk, ex_side)
 
         elif row.get("exit_required"):

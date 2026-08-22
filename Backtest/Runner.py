@@ -74,6 +74,32 @@ def _build_config_json5(
         },
         "monte_carlo": dict(bt.get("monte_carlo", {})),
     }
+
+    # Inject per-asset condition/signal overrides from Strategy.toml so that
+    # SharedData/Strategy.toml is the single source of truth for both live and backtest.
+    _COND = (
+        "minimum_volatility_regime", "long_entry_minimum_candles",
+        "short_trend_window", "short_entry_minimum_bearish_bars",
+        "require_slope_confirmation",
+    )
+    _SIG = {
+        "signal_minimum_overall_confidence": "thresholds.minimum_overall_confidence",
+        "signal_minimum_signal_score": "thresholds.minimum_signal_score",
+    }
+    st = _toml("Strategy").get("assets", {})
+    strategy_by_asset, indicator_by_asset = {}, {}
+    for asset, params in st.items():
+        conds = {k: params[k] for k in _COND if k in params}
+        if conds:
+            strategy_by_asset[asset] = {"conditions": conds}
+        sigs = {dot: params[tk] for tk, dot in _SIG.items() if tk in params}
+        if sigs:
+            indicator_by_asset[asset] = {"signal": sigs}
+    if strategy_by_asset:
+        cfg["Strategy_by_asset"] = strategy_by_asset
+    if indicator_by_asset:
+        cfg["Indicator_by_asset"] = indicator_by_asset
+
     # json.dumps produces valid JSON5 (JSON is valid JSON5)
     return json.dumps(cfg, indent=2)
 
@@ -150,6 +176,12 @@ def run(
                 parts = list(pool.map(_one, asset_list))
             return pl.concat(parts).sort("timestamp", "asset")
 
+        _orig_execute = _bt.execute_signals
+
+        def _long_no_exit_execute(strategy, **kwargs):
+            return _orig_execute(strategy, long_no_exit=True, **kwargs)
+
+        _bt.execute_signals = _long_no_exit_execute
         _bt.build_final_strategy_dataframe = _par_build
         try:
             cache_dir = _ROOT / ".cache" / "ohlcv"
@@ -161,6 +193,7 @@ def run(
             )
         finally:
             _bt.build_final_strategy_dataframe = _seq_build
+            _bt.execute_signals = _orig_execute
 
         trades = frames.trades
         if "side" not in trades.columns and "type" in trades.columns:

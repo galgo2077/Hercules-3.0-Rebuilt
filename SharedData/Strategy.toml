@@ -27,17 +27,23 @@ checkpoint_trail_pct  = 0.008
 short_trailing_stop_pct = 0.018
 trade_size_pct        = 0.15
 leverage              = 8.0
+# phase 2: skip low-vol flat periods, tighter signal quality
+minimum_volatility_regime         = 2
+signal_minimum_overall_confidence = 0.42
 
 [assets.ETHUSDT]
 rdma_medium_half_life = 380
 rdma_slow_half_life   = 650
 slope_lookback        = 13
 min_direction_bars    = 96
-long_entry_minimum_candles    = 48
-short_trend_window            = 8
-short_entry_minimum_bearish_bars = 8
 take_profit_pct       = 0.03
 checkpoint_trail_pct  = 0.01
+# phase 2: vol filter + longer trend confirmation before entry (esp. shorts)
+minimum_volatility_regime         = 2
+long_entry_minimum_candles        = 64
+short_trend_window                = 24
+short_entry_minimum_bearish_bars  = 24
+signal_minimum_overall_confidence = 0.42
 
 [assets.XRPUSDT]
 rdma_fast_half_life   = 40
@@ -45,17 +51,19 @@ rdma_medium_half_life = 400
 rdma_slow_half_life   = 1050
 slope_lookback        = 12
 min_direction_bars    = 150
-minimum_volatility_regime        = 3
-long_entry_minimum_candles       = 72
-short_trend_window               = 72
-short_entry_minimum_bearish_bars = 72
-signal_minimum_overall_confidence = 0.55
-signal_minimum_signal_score       = 0.35
+minimum_volatility_regime         = 3
+long_entry_minimum_candles        = 72
+short_trend_window                = 72
+short_entry_minimum_bearish_bars  = 72
+# phase 2: tighter thresholds for higher quality signals
+signal_minimum_overall_confidence = 0.58
+signal_minimum_signal_score       = 0.42
 
 [assets.SOLUSDT]
-minimum_volatility_regime        = 1
-long_entry_minimum_candles       = 48
-short_trend_window               = 48
-short_entry_minimum_bearish_bars = 48
-signal_minimum_overall_confidence = 0.35
+# phase 2: vol=2 eliminates flat-market microtrends (was biggest issue)
+minimum_volatility_regime         = 2
+long_entry_minimum_candles        = 64
+short_trend_window                = 64
+short_entry_minimum_bearish_bars  = 64
+signal_minimum_overall_confidence = 0.45
 signal_minimum_signal_score       = 0.45

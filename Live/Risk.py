@@ -88,3 +88,18 @@ def on_exit(state: RiskState, side: str) -> None:
 
 def update_equity(state: RiskState, new_equity: float) -> None:
     state.current_equity = new_equity
+
+
+def eviction_priority(positions: dict) -> list[str]:
+    """Assets ordered by eviction preference when capital is needed.
+
+    SHORTs evicted first (oldest open_time first within side).
+    LONGs only after all SHORTs exhausted — keep longs alive as long as possible.
+    """
+    def _key(item: tuple) -> tuple:
+        _, pos = item
+        side_rank = 0 if pos.side == "SHORT" else 1
+        age = getattr(pos, "open_time", 0.0)
+        return (side_rank, age)
+
+    return [asset for asset, _ in sorted(positions.items(), key=_key)]

@@ -14,7 +14,7 @@ from typing import Any
 import websockets
 
 from Dataframe.CandleBuffer import CandleBuffer
-from Live.Risk import RiskState, check_entry, on_entry, on_exit, size_trade
+from Live.Risk import RiskState, check_entry, eviction_priority, on_entry, on_exit, size_trade
 
 log = logging.getLogger(__name__)
 
@@ -38,6 +38,8 @@ class VirtualPosition:
     entry_price: float = 0.0
     size_usdt: float = 0.0
     open_time: float = field(default_factory=time.time)
+    stop_loss_price: float | None = None   # SHORT only
+    take_profit_price: float | None = None  # SHORT only
 
 
 @dataclass
@@ -77,12 +79,27 @@ class PaperEngine:
         candles = self._buffer.get(asset)
         return candles[-1].close if candles else 0.0
 
-    def _enter(self, asset: str, side: str, amount: float) -> None:
+    def _enter(
+        self,
+        asset: str,
+        side: str,
+        amount: float,
+        *,
+        stop_loss_pct: float | None = None,
+        take_profit_pct: float | None = None,
+    ) -> None:
         price = self._current_price(asset)
         if price <= 0:
             return
-        self._positions[asset] = VirtualPosition(asset=asset, side=side, entry_price=price, size_usdt=amount)
-        log.info("PAPER %s %s @ %.4f (%.2f USDT)", side, asset, price, amount)
+        sl = round(price * (1.0 + stop_loss_pct), 2) if stop_loss_pct and side == "SHORT" else None
+        tp = round(price * (1.0 - take_profit_pct), 2) if take_profit_pct and side == "SHORT" else None
+        self._positions[asset] = VirtualPosition(
+            asset=asset, side=side, entry_price=price, size_usdt=amount,
+            stop_loss_price=sl, take_profit_price=tp,
+        )
+        log.info("PAPER %s %s @ %.4f (%.2f USDT) SL=%s TP=%s",
+                 side, asset, price, amount,
+                 f"{sl:.4f}" if sl else "none", f"{tp:.4f}" if tp else "none")
 
     def _exit(self, asset: str) -> None:
         pos = self._positions.pop(asset, None)
@@ -108,7 +125,7 @@ class PaperEngine:
         import polars as pl
 
         from Dataframe.Frame import build
-        from Strategy.Strategy import evaluate
+        from Strategy.Strategy import asset_risk_params, evaluate
 
         stream = msg.get("stream", "")
         asset = stream.split("@")[0].upper() + "USDT" if "@" in stream else ""
@@ -119,7 +136,27 @@ class PaperEngine:
         if not self._buffer.ready(asset, _MIN_BARS):
             return
 
-        ohlcv = pl.DataFrame(self._buffer.to_dicts(asset)).with_columns(pl.from_epoch(pl.col("timestamp"), time_unit="ms").alias("timestamp"))
+        ohlcv = pl.DataFrame(self._buffer.to_dicts(asset)).with_columns(
+            pl.from_epoch(pl.col("timestamp"), time_unit="ms").alias("timestamp")
+        )
+
+        # Check SL/TP for active short before running strategy
+        pos = self._positions.get(asset)
+        if pos and pos.side == "SHORT":
+            candle = ohlcv.tail(1)
+            candle_high = float(candle["high"][0])
+            candle_low = float(candle["low"][0])
+            if pos.stop_loss_price is not None and candle_high >= pos.stop_loss_price:
+                log.info("PAPER SL hit %s high=%.4f sl=%.4f", asset, candle_high, pos.stop_loss_price)
+                self._exit(asset)
+                on_exit(self._risk, "SHORT")
+                return
+            if pos.take_profit_price is not None and candle_low <= pos.take_profit_price:
+                log.info("PAPER TP hit %s low=%.4f tp=%.4f", asset, candle_low, pos.take_profit_price)
+                self._exit(asset)
+                on_exit(self._risk, "SHORT")
+                return
+
         pos = self._positions.get(asset)
         exposure = {asset: (1.0 if pos and pos.side == "LONG" else -1.0 if pos and pos.side == "SHORT" else 0.0)}
         frame = build(ohlcv)
@@ -131,16 +168,36 @@ class PaperEngine:
         row = last.row(0, named=True)
         action = row.get("action", "Hold")
         side = row.get("side", "")
-        amount = size_trade(self._risk.current_equity, asset, portfolio=self._pf)
+        risk = asset_risk_params(asset)
+        weight = float(self._pf.get("allocation", {}).get(asset, 0.0))
+        leverage = int(risk["leverage"] or 1)
+        amount = self._risk.current_equity * weight * (risk["trade_size_pct"] or 0.30) * leverage
 
         if action == "Entry":
             ex_side = "LONG" if side == "Long" else "SHORT"
-            ok, reason = check_entry(self._risk, ex_side, asset, amount)
-            if ok:
-                self._enter(asset, ex_side, amount)
-                on_entry(self._risk, ex_side)
+            current = self._positions.get(asset)
+            if ex_side == "SHORT" and current and current.side == "LONG":
+                # LONGs have no exit — reversal signal suppressed, long continues
+                log.debug("PAPER suppress SHORT reversal — LONG active on %s", asset)
             else:
-                log.info("PAPER entry blocked %s: %s", asset, reason)
+                ok, reason = check_entry(self._risk, ex_side, asset, amount)
+                if not ok:
+                    log.info("PAPER entry blocked %s: %s", asset, reason)
+                else:
+                    other_pos = {a: p for a, p in self._positions.items() if a != asset}
+                    deployed = sum(p.size_usdt for p in other_pos.values())
+                    free = self._risk.current_equity - deployed
+                    if amount > free and other_pos:
+                        victim = eviction_priority(other_pos)[0]
+                        log.info("PAPER evict %s (%s) → free capital for %s %s",
+                                 victim, self._positions[victim].side, ex_side, asset)
+                        old_side = self._positions[victim].side
+                        self._exit(victim)
+                        on_exit(self._risk, old_side)
+                    self._enter(asset, ex_side, amount,
+                                stop_loss_pct=risk["stop_loss_pct"] if ex_side == "SHORT" else None,
+                                take_profit_pct=risk["take_profit_pct"] if ex_side == "SHORT" else None)
+                    on_entry(self._risk, ex_side)
         elif row.get("exit_required") and asset in self._positions:
             old_side = self._positions[asset].side
             self._exit(asset)

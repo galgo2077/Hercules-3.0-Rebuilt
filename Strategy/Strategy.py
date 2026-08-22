@@ -11,6 +11,15 @@ import polars as pl
 _SHARED_DATA = Path(__file__).parent.parent / "SharedData"
 _STRATEGY_TOML = _SHARED_DATA / "Strategy.toml"
 
+_RISK_KEYS = (
+    "leverage",
+    "trade_size_pct",
+    "take_profit_pct",
+    "checkpoint_trail_pct",
+    "short_trailing_stop_pct",
+    "stop_loss_pct",
+)
+
 DECISION_COLUMNS = (
     "timestamp",
     "asset",
@@ -22,6 +31,23 @@ DECISION_COLUMNS = (
     "exit_required",
     "reason",
 )
+
+
+def asset_risk_params(asset: str, portfolio_toml: Path | None = None) -> dict:
+    """Merged risk params for asset: Strategy.toml per-asset overrides Portfolio.toml base."""
+    _pf = portfolio_toml or (_SHARED_DATA / "Portfolio.toml")
+    with _STRATEGY_TOML.open("rb") as f:
+        strategy = tomllib.load(f)
+    with _pf.open("rb") as f:
+        portfolio = tomllib.load(f)
+    result: dict = {k: portfolio.get(k) for k in _RISK_KEYS}
+    for k, v in result.items():
+        if v is not None:
+            result[k] = float(v)
+    for k in _RISK_KEYS:
+        if k in strategy.get("assets", {}).get(asset, {}):
+            result[k] = float(strategy["assets"][asset][k])
+    return result
 
 
 def _load_require_slope() -> bool:
@@ -98,21 +124,39 @@ def evaluate(
             trade_size,
         )
 
-        # update exposure tracking
-        if result.entry_allowed:
-            exposure[asset] = result.target_exposure
+        # LONGs have no exit — suppress reversal_to_short, preserve exposure
+        long_suppressed = result.reason == "reversal_to_short" and current_exposure > 1e-9
+        if long_suppressed:
+            action_out = "Hold"
+            side_out = "Long"
+            target_out = current_exposure
+            delta_out = 0.0
+            entry_allowed_out = False
+            exit_required_out = False
+            reason_out = "long_hold_no_exit"
+        else:
+            action_out = result.action
+            side_out = result.side
+            target_out = result.target_exposure
+            delta_out = result.exposure_delta
+            entry_allowed_out = result.entry_allowed
+            exit_required_out = result.exit_required
+            reason_out = result.reason
+
+        if entry_allowed_out:
+            exposure[asset] = target_out
 
         results.append(
             {
                 "timestamp": row["timestamp"],
                 "asset": asset,
-                "action": result.action,
-                "side": result.side,
-                "target_exposure": result.target_exposure,
-                "exposure_delta": result.exposure_delta,
-                "entry_allowed": result.entry_allowed,
-                "exit_required": result.exit_required,
-                "reason": result.reason,
+                "action": action_out,
+                "side": side_out,
+                "target_exposure": target_out,
+                "exposure_delta": delta_out,
+                "entry_allowed": entry_allowed_out,
+                "exit_required": exit_required_out,
+                "reason": reason_out,
             }
         )
 

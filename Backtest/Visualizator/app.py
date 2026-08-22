@@ -119,9 +119,12 @@ def launch_visualizer(strategy: pl.DataFrame, trades: pl.DataFrame, equity: pl.D
     assets = strategy["asset"].unique().sort().to_list()
     equity_assets = equity["asset"].unique().sort().to_list()
     equity_assets = [asset for asset in equity_assets if asset != "TOTAL"] + (["TOTAL"] if "TOTAL" in equity_assets else [])
-    total_pnl = float(cast(float | int | str, trades["pnl"].sum() or 0.0)) if not trades.is_empty() else 0.0
-    win_rate = float(cast(float | int | str, (trades["outcome"] == "win").mean() or 0.0)) if not trades.is_empty() else 0.0
-    stats = f"TOTAL  Trades {trades.height}  PnL ${total_pnl:,.2f}  Win rate {win_rate:.1%}"
+    _eq_total = equity.filter(pl.col("asset") == "TOTAL") if not equity.is_empty() else equity
+    _eq_ref = _eq_total if not _eq_total.is_empty() else equity
+    init_money = float(_eq_ref["equity"][0])
+    _res_total = results.filter(pl.col("asset") == "TOTAL") if results is not None and "end_money" in (results.columns if results is not None else []) else pl.DataFrame()
+    end_money = float(_res_total["end_money"][0]) if not _res_total.is_empty() else float(_eq_ref["equity"][-1])
+    stats = f"Init ${init_money:,.2f}  End ${end_money:,.2f}"
     tab = {"backgroundColor": "#111", "color": "#888", "border": "none", "padding": "6px 14px"}
     selected = {**tab, "backgroundColor": "#222", "color": "#fff", "borderBottom": "2px solid #4fc3f7"}
     app = Dash(__name__, suppress_callback_exceptions=True)
