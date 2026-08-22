@@ -25,6 +25,17 @@ from Backtest.Runner import BacktestResult
 
 _con = Console()
 
+# Result-frame field names are retained for API compatibility.  These labels
+# make the dashboard units explicit: consumed_money is cumulative margin
+# turnover, not cash currently locked in the portfolio.
+_RESULT_LABELS = {
+    "consumed_money": "margin_turnover",
+    "end_money": "ending_equity",
+    "roi_usd": "realized_pnl",
+    "max_drawdown": "max_equity_dd_pct",
+    "max_drawdown_usd": "max_equity_dd_usd",
+}
+
 
 class BacktestProgress:
     """Hercules 3.0 per-asset backtest progress display."""
@@ -220,7 +231,8 @@ class BacktestDashboard:
         start = min(column, max(0, len(columns) - visible))
         shown = columns[start : start + visible]
         for offset, name in enumerate(shown):
-            _add(self.screen, y0, offset * cell_width, name[: cell_width - 1].ljust(cell_width), curses.A_BOLD | curses.color_pair(1))
+            label = _RESULT_LABELS.get(name, name)
+            _add(self.screen, y0, offset * cell_width, label[: cell_width - 1].ljust(cell_width), curses.A_BOLD | curses.color_pair(1))
         row_start = min(max(0, selected - height // 2), max(0, frame.height - height))
         thresholds = dict(view.color_thresholds)
         for offset, index in enumerate(range(row_start, min(frame.height, row_start + height))):
@@ -280,7 +292,7 @@ def _results_views(result: BacktestResult) -> list[DashboardView]:
     pnl = tuple(column for column in ("asset", "win_rate", "win_longs_pct", "win_shorts_pct", "end_money", "roi", "roi_usd", "max_drawdown", "max_drawdown_usd") if column in columns)
     risk = tuple(column for column in columns if column not in set(pnl) - {"asset"})
     thresholds = tuple((column, threshold) for column, threshold in (("roi", 0.0), ("roi_usd", 0.0), ("max_drawdown", 0.0), ("max_drawdown_usd", 0.0), ("win_rate", 0.5), ("win_longs_pct", 0.5), ("win_shorts_pct", 0.5)) if column in columns)
-    context = f"Range: {results['start'][0]} to {results['end'][0]} | Drawdown: realized PnL ordered by exit time" if {"start", "end"} <= set(results.columns) else ""
+    context = f"Range: {results['start'][0]} to {results['end'][0]} | Drawdown: worst intrabar equity fall vs realized-equity peak" if {"start", "end"} <= set(results.columns) else ""
     twin = DashboardView("Results", sorted_results, pnl, context, False, percent, color_thresholds=thresholds)
     return [DashboardView("Results Risk", sorted_results, risk, context, False, percent, twin, thresholds)]
 def print_results(result: BacktestResult) -> None:
