@@ -26,7 +26,7 @@ long_entry_minimum_candles        = 0
 short_trend_window                = 1
 short_entry_minimum_bearish_bars  = 1
 signal_minimum_overall_confidence = 0.40
-signal_minimum_signal_score       = 0.40
+signal_minimum_signal_score       = 0.41
 leverage                          = 8.0
 trade_size_pct                    = 0.15
 stop_loss_pct                     = 0.06
@@ -45,7 +45,7 @@ long_entry_minimum_candles        = 0
 short_trend_window                = 1
 short_entry_minimum_bearish_bars  = 1
 signal_minimum_overall_confidence = 0.40
-signal_minimum_signal_score       = 0.40
+signal_minimum_signal_score       = 0.444
 take_profit_pct                   = 0.03
 checkpoint_trail_pct              = 0.01
 
@@ -60,7 +60,7 @@ long_entry_minimum_candles        = 0
 short_trend_window                = 1
 short_entry_minimum_bearish_bars  = 1
 signal_minimum_overall_confidence = 0.40
-signal_minimum_signal_score       = 0.40
+signal_minimum_signal_score       = 0.44
 
 [assets.SOLUSDT]
 rdma_fast_half_life               = 25
@@ -72,6 +72,6 @@ minimum_volatility_regime         = 1
 long_entry_minimum_candles        = 0
 short_trend_window                = 1
 short_entry_minimum_bearish_bars  = 1
-signal_minimum_overall_confidence = 0.40
+signal_minimum_overall_confidence = 0.45
 # Reject marginal SOL signals: they produced a high win rate but negative payoff.
-signal_minimum_signal_score       = 0.42
+signal_minimum_signal_score       = 0.45
