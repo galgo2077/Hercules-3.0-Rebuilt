@@ -20,6 +20,16 @@ class AuthUser:
     role: str  # "authenticated" | "service_role" | custom claim
 
 
+def _effective_role(user: object) -> str:
+    """Return only server-assigned elevated roles from Supabase metadata."""
+    app_metadata = getattr(user, "app_metadata", None)
+    if isinstance(app_metadata, dict) and app_metadata.get("role") == "admin":
+        return "admin"
+
+    role = getattr(user, "role", None)
+    return role if role in {"authenticated", "service_role"} else "authenticated"
+
+
 async def _validate(
     creds: Annotated[HTTPAuthorizationCredentials, Depends(_bearer)],
 ) -> AuthUser:
@@ -40,7 +50,7 @@ async def _validate(
 
     if user is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
-    return AuthUser(id=str(user.id), email=user.email, role=user.role or "authenticated")
+    return AuthUser(id=str(user.id), email=user.email, role=_effective_role(user))
 
 
 # FastAPI dependency — use in route as: user: Annotated[AuthUser, Depends(require_auth)]
