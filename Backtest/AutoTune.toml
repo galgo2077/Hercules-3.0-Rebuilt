@@ -6,6 +6,7 @@ training_fraction = 0.50
 paths = 8
 candidates = 48
 seed = 42
+duration_minutes = 30
 
 [constraints]
 minimum_total_trades = 280
@@ -13,6 +14,7 @@ maximum_total_trades = 320
 minimum_win_rate = 0.70
 minimum_roi_pct = 34.9165
 minimum_max_drawdown_pct = -65.0
+minimum_roi_to_drawdown = 2.0
 
 [ranges]
 minimum_confidence = 0.35
