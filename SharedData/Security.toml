@@ -11,5 +11,5 @@ max_request_bytes                = 1048576   # 1 MiB
 # Origins allowed by CORS middleware.
 # Add production domain after deployment.
 allowed_origins = ["http://localhost:8765", "http://127.0.0.1:8765"]
-allowed_hosts   = ["localhost", "127.0.0.1"]
+allowed_hosts   = ["localhost", "127.0.0.1", "app.herculestradingsystem.dpdns.org"]
 secure_cookie   = false   # set true behind HTTPS/Cloudflare
