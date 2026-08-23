@@ -54,7 +54,7 @@ def enter(
                 type="STOP_MARKET",
                 stopPrice=sl_price,
                 positionSide="SHORT",
-                closePosition="true",
+                quantity=qty,
             )
         except Exception as exc:
             log.error("SL order failed for %s short @ sl=%.4f — position NAKED: %s", symbol, sl_price, exc)
@@ -70,7 +70,7 @@ def enter(
                 type="TAKE_PROFIT_MARKET",
                 stopPrice=tp_price,
                 positionSide="SHORT",
-                closePosition="true",
+                quantity=qty,
             )
         except Exception as exc:
             log.error("TP order failed for %s short @ tp=%.4f — position NAKED: %s", symbol, tp_price, exc)
@@ -79,15 +79,16 @@ def enter(
 
 
 def exit(client: BinanceClient, symbol: str, quantity: float | None = None) -> dict[str, Any]:
-    """Close a short position — reduceOnly MARKET BUY."""
-    params: dict[str, Any] = dict(
+    """Close a short position — MARKET BUY with explicit qty (hedge mode requires quantity, not closePosition)."""
+    if quantity is None:
+        positions = client.get("/fapi/v2/positionRisk")
+        pos = next((p for p in positions if p["symbol"] == symbol and p["positionSide"] == "SHORT"), None)
+        quantity = abs(float(pos["positionAmt"])) if pos else 0.0
+    return client.post(
+        "/fapi/v1/order",
         symbol=symbol,
         side="BUY",
         type="MARKET",
         positionSide="SHORT",
+        quantity=round(quantity, 3),
     )
-    if quantity is not None:
-        params["quantity"] = round(quantity, 3)
-    else:
-        params["closePosition"] = "true"
-    return client.post("/fapi/v1/order", **params)

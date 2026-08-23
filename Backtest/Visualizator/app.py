@@ -124,7 +124,8 @@ def launch_visualizer(strategy: pl.DataFrame, trades: pl.DataFrame, equity: pl.D
     init_money = float(_eq_ref["equity"][0])
     _res_total = results.filter(pl.col("asset") == "TOTAL") if results is not None and "end_money" in (results.columns if results is not None else []) else pl.DataFrame()
     end_money = float(_res_total["end_money"][0]) if not _res_total.is_empty() else float(_eq_ref["equity"][-1])
-    stats = f"Init ${init_money:,.2f}  End ${end_money:,.2f}"
+    closed_trades = trades.filter(pl.col("exit_price").is_not_null()).height
+    stats = f"Init ${init_money:,.2f}  End ${end_money:,.2f}  Closed trades {closed_trades}"
     tab = {"backgroundColor": "#111", "color": "#888", "border": "none", "padding": "6px 14px"}
     selected = {**tab, "backgroundColor": "#222", "color": "#fff", "borderBottom": "2px solid #4fc3f7"}
     app = Dash(__name__, suppress_callback_exceptions=True)

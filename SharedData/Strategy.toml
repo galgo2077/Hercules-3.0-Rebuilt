@@ -25,8 +25,8 @@ minimum_volatility_regime         = 1
 long_entry_minimum_candles        = 0
 short_trend_window                = 1
 short_entry_minimum_bearish_bars  = 1
-signal_minimum_overall_confidence = 0.40
-signal_minimum_signal_score       = 0.41
+signal_minimum_overall_confidence = 0.470
+signal_minimum_signal_score       = 0.373
 leverage                          = 8.0
 trade_size_pct                    = 0.15
 stop_loss_pct                     = 0.06
@@ -44,8 +44,8 @@ minimum_volatility_regime         = 1
 long_entry_minimum_candles        = 0
 short_trend_window                = 1
 short_entry_minimum_bearish_bars  = 1
-signal_minimum_overall_confidence = 0.40
-signal_minimum_signal_score       = 0.444
+signal_minimum_overall_confidence = 0.353
+signal_minimum_signal_score       = 0.454
 take_profit_pct                   = 0.03
 checkpoint_trail_pct              = 0.01
 
@@ -59,8 +59,8 @@ minimum_volatility_regime         = 1
 long_entry_minimum_candles        = 0
 short_trend_window                = 1
 short_entry_minimum_bearish_bars  = 1
-signal_minimum_overall_confidence = 0.40
-signal_minimum_signal_score       = 0.44
+signal_minimum_overall_confidence = 0.361
+signal_minimum_signal_score       = 0.403
 
 [assets.SOLUSDT]
 rdma_fast_half_life               = 25

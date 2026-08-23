@@ -6,12 +6,12 @@ mode = "real"
 
 [data]
 start_date = "2020-04-01T00:00:00Z"
-end_date   = "2026-07-20T00:00:00Z"
+end_date   = "2026-08-22T00:00:00Z"
 timeframe  = "1h"
 assets     = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT"]
 
 [capital]
-initial_cash        = 100.0
+initial_cash        = 1000.0
 minimum_free_equity = 10.0
 max_gross_exposure  = 1.0
 allow_short         = true
@@ -22,23 +22,6 @@ slippage_rate = 0.0005
 flip_signals  = false
 # Maximum simultaneous entries in the same direction and asset.
 pyramiding_max = 3
-
-# Backtest-only candidate. Live execution settings remain separate.
-[execution_by_asset.BTCUSDT]
-leverage = 5.0
-trade_size_percentage = 0.70
-
-[execution_by_asset.ETHUSDT]
-leverage = 5.0
-trade_size_percentage = 0.70
-
-[execution_by_asset.SOLUSDT]
-leverage = 5.0
-trade_size_percentage = 0.70
-
-[execution_by_asset.XRPUSDT]
-leverage = 5.0
-trade_size_percentage = 0.70
 
 # Null-valued Hercules 3.0 optional controls are intentionally omitted: their
 # engine defaults are null/false and preserve the same execution behavior.

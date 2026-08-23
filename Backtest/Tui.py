@@ -291,10 +291,30 @@ def _results_views(result: BacktestResult) -> list[DashboardView]:
         sorted_results = sorted_results.with_columns(
             (pl.col("end_money") - pl.col("roi_usd")).alias("initial_equity")
         )
+    # cycles: count of direction reversals per asset (long→short or short→long)
+    # shows how many times the strategy closed one side to open the opposite
+    type_col = next((c for c in ("type", "side") if c in result.trades.columns), None)
+    entry_col = next((c for c in ("timestamp", "entry_time") if c in result.trades.columns), None)
+    if "asset" in result.trades.columns and type_col and entry_col and not result.trades.is_empty():
+        cycle_counts: dict[str, int] = {}
+        for asset in result.trades["asset"].unique().to_list():
+            t = result.trades.filter(pl.col("asset") == asset).sort(entry_col)
+            sides = t[type_col].to_list()
+            cycle_counts[asset] = sum(1 for i in range(len(sides) - 1) if sides[i] != sides[i + 1])
+        total_cycles = sum(cycle_counts.values())
+        per_asset = pl.DataFrame({
+            "asset": list(cycle_counts.keys()),
+            "cycles": pl.Series(list(cycle_counts.values()), dtype=pl.Int64),
+        })
+        total_row = pl.DataFrame({"asset": ["TOTAL"], "cycles": pl.Series([total_cycles], dtype=pl.Int64)})
+        closed_map = pl.concat([per_asset, total_row])
+        sorted_results = sorted_results.join(closed_map, on="asset", how="left").with_columns(
+            pl.col("cycles").fill_null(0)
+        )
     columns = [column for column in sorted_results.columns if column not in ("start", "end")]
     percent = tuple(column for column in ("roi", "buy_and_hold_roi", "max_drawdown", "win_rate", "win_longs_pct", "win_shorts_pct", "nlb&h_roi") if column in columns)
     pnl = tuple(column for column in ("asset", "win_rate", "win_longs_pct", "win_shorts_pct", "initial_equity", "end_money", "roi", "roi_usd", "max_drawdown", "max_drawdown_usd") if column in columns)
-    risk = tuple(column for column in columns if column not in set(pnl) - {"asset"})
+    risk = tuple(column for column in columns if column not in set(pnl) - {"asset", "cycles"})
     thresholds = tuple((column, threshold) for column, threshold in (("roi", 0.0), ("roi_usd", 0.0), ("max_drawdown", 0.0), ("max_drawdown_usd", 0.0), ("win_rate", 0.5), ("win_longs_pct", 0.5), ("win_shorts_pct", 0.5)) if column in columns)
     context = f"Range: {results['start'][0]} to {results['end'][0]} | Drawdown: worst intrabar equity fall vs realized-equity peak" if {"start", "end"} <= set(results.columns) else ""
     twin = DashboardView("Results", sorted_results, pnl, context, False, percent, color_thresholds=thresholds)

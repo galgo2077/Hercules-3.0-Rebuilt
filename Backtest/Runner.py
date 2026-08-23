@@ -44,6 +44,7 @@ def _build_config_json5(
 ) -> str:
     """Build a JSON5 config string matching Backtest/params.json5 format."""
     bt = _toml("Backtest")
+    portfolio = _toml("Portfolio")
 
     _start = start or bt["data"]["start_date"]
     _end = end or bt["data"]["end_date"]
@@ -58,6 +59,10 @@ def _build_config_json5(
             "end_date": _end,
             "timeframe": str(bt["data"].get("timeframe", "1h")),
             "assets": _assets,
+            "portfolio_weights": {
+                asset: float(portfolio["allocation"][asset])
+                for asset in _assets
+            },
         },
         "capital": {
             "initial_cash": _cash,
@@ -73,6 +78,13 @@ def _build_config_json5(
             "higher_timeframe_window": None,
             "pyramiding_max": None,
             **dict(bt["execution"]),
+            "leverage": float(portfolio["leverage"]),
+            "trade_size_percentage": float(portfolio["trade_size_pct"]),
+            "take_profit_pct": float(portfolio["take_profit_pct"]),
+            "checkpoint_trail_pct": float(portfolio["checkpoint_trail_pct"]),
+            "short_trailing_stop_pct": float(portfolio["short_trailing_stop_pct"]),
+            "short_exit_on_bullish_trend": bool(portfolio["short_exit_on_bullish_trend"]),
+            "max_concurrent_shorts": int(portfolio["max_concurrent_shorts"]),
         },
         "monte_carlo": dict(bt.get("monte_carlo", {})),
     }
@@ -101,10 +113,6 @@ def _build_config_json5(
         cfg["Strategy_by_asset"] = strategy_by_asset
     if indicator_by_asset:
         cfg["Indicator_by_asset"] = indicator_by_asset
-    execution_by_asset = bt.get("execution_by_asset", {})
-    if execution_by_asset:
-        cfg["execution_by_asset"] = execution_by_asset
-
     # json.dumps produces valid JSON5 (JSON is valid JSON5)
     return json.dumps(cfg, indent=2)
 
@@ -209,6 +217,24 @@ def run(
 
         _bt.build_final_strategy_dataframe = _par_build
         _trend_detector.resolve_trend_params = _rebuilt_trend_params
+
+        # The original engine reads canonical settings from its own repository.
+        # Replace that read for this call so Portfolio.toml governs allocation and
+        # risk settings in both the generated config and engine internals.
+        _orig_load_shared_params = _bt.load_shared_params
+        _portfolio = _toml("Portfolio")
+        _shared_params = deepcopy(_orig_load_shared_params())
+        _shared_params.update({
+            "leverage": float(_portfolio["leverage"]),
+            "trade_size_percentage": float(_portfolio["trade_size_pct"]),
+            "take_profit_pct": float(_portfolio["take_profit_pct"]),
+            "checkpoint_trail_pct": float(_portfolio["checkpoint_trail_pct"]),
+            "short_trailing_stop_pct": float(_portfolio["short_trailing_stop_pct"]),
+            "short_exit_on_bullish_trend": bool(_portfolio["short_exit_on_bullish_trend"]),
+            "max_concurrent_shorts": int(_portfolio["max_concurrent_shorts"]),
+            "portfolio_weights": dict(_portfolio["allocation"]),
+        })
+        _bt.load_shared_params = lambda: deepcopy(_shared_params)
         try:
             cache_dir = _ROOT / ".cache" / "ohlcv"
             frames = load_backtest_frames(
@@ -220,6 +246,7 @@ def run(
         finally:
             _bt.build_final_strategy_dataframe = _seq_build
             _trend_detector.resolve_trend_params = _orig_resolve_trend_params
+            _bt.load_shared_params = _orig_load_shared_params
 
         trades = frames.trades
         if "side" not in trades.columns and "type" in trades.columns:

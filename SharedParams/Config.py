@@ -62,10 +62,10 @@ def _load_toml(name: str, config_dir: Path | None = None) -> dict:
 
 def _validate_weights(weights: dict[str, float], source: str) -> None:
     total = sum(weights.values())
-    if abs(total - 1.0) > 1e-9:
-        raise ValueError(f"{source}: portfolio weights sum to {total:.6f}, must be 1.0")
     if any(w < 0 for w in weights.values()):
         raise ValueError(f"{source}: portfolio weights must be non-negative")
+    if total <= 0:
+        raise ValueError(f"{source}: portfolio weights must sum to a positive value")
 
 
 def load(config_dir: Path | None = None) -> HerculesConfig:

@@ -6,12 +6,18 @@ CREATE TABLE IF NOT EXISTS exchange_accounts (
     id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id     UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
     label       TEXT NOT NULL,
-    api_key     TEXT NOT NULL,        -- encrypted at app layer before insert
-    api_secret  TEXT NOT NULL,        -- encrypted at app layer before insert
+    api_key     TEXT NOT NULL,        -- AES-GCM ciphertext, base64
+    key_meta    TEXT NOT NULL,        -- "nonce_b64:tag_b64"
+    api_secret  TEXT NOT NULL,        -- AES-GCM ciphertext, base64
+    secret_meta TEXT NOT NULL,        -- "nonce_b64:tag_b64"
     environment TEXT NOT NULL DEFAULT 'testnet' CHECK (environment IN ('testnet', 'real')),
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE (user_id, label)
 );
+
+-- Migration: add key_meta/secret_meta if upgrading from initial schema
+ALTER TABLE exchange_accounts ADD COLUMN IF NOT EXISTS key_meta    TEXT NOT NULL DEFAULT '';
+ALTER TABLE exchange_accounts ADD COLUMN IF NOT EXISTS secret_meta TEXT NOT NULL DEFAULT '';
 
 CREATE TABLE IF NOT EXISTS trades (
     id            BIGSERIAL PRIMARY KEY,
