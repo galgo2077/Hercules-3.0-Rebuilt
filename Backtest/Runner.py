@@ -17,7 +17,7 @@ from pathlib import Path
 import polars as pl
 
 _ROOT = Path(__file__).resolve().parents[1]
-_ORIGINAL = Path("/home/void/Documents/Hercules 3.0")
+_ORIGINAL = Path(os.environ.get("HERCULES_ORIGINAL_ROOT", "/home/void/Documents/Hercules 3.0")).expanduser()
 ProgressCallback = Callable[[str, float], None]
 MonteCarloProgressCallback = Callable[[int, int], None]
 
