@@ -1,0 +1,21 @@
+# Real-candle Monte Carlo tuning. Each path is one random, contiguous 50% window.
+# Candidate passes only when every path passes every hard limit.
+
+[search]
+training_fraction = 0.50
+paths = 8
+candidates = 48
+seed = 42
+
+[constraints]
+minimum_total_trades = 280
+maximum_total_trades = 320
+minimum_win_rate = 0.70
+minimum_roi_pct = 34.9165
+minimum_max_drawdown_pct = -65.0
+
+[ranges]
+minimum_confidence = 0.35
+maximum_confidence = 0.48
+minimum_score = 0.37
+maximum_score = 0.50

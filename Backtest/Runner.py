@@ -40,6 +40,7 @@ def _build_config_json5(
     end: str | None,
     assets: list[str] | None,
     initial_cash: float | None,
+    strategy_override: dict | None = None,
 ) -> str:
     """Build a JSON5 config string matching Backtest/params.json5 format."""
     bt = _toml("Backtest")
@@ -87,7 +88,7 @@ def _build_config_json5(
         "signal_minimum_overall_confidence": "thresholds.minimum_overall_confidence",
         "signal_minimum_signal_score": "thresholds.minimum_signal_score",
     }
-    st = _toml("Strategy").get("assets", {})
+    st = (strategy_override or _toml("Strategy")).get("assets", {})
     strategy_by_asset, indicator_by_asset = {}, {}
     for asset, params in st.items():
         conds = {k: params[k] for k in _COND if k in params}
@@ -114,6 +115,8 @@ def run(
     end: str | None = None,
     assets: list[str] | None = None,
     initial_cash: float | None = None,
+    strategy_override: dict | None = None,
+    maria_api: object | None = None,
     progress: ProgressCallback | None = None,
     monte_carlo_progress: MonteCarloProgressCallback | None = None,
 ) -> BacktestResult:
@@ -145,7 +148,7 @@ def run(
     config_path: str | None = None
     try:
         # Write temp JSON5 config
-        config_json = _build_config_json5(start, end, assets, initial_cash)
+        config_json = _build_config_json5(start, end, assets, initial_cash, strategy_override)
         with tempfile.NamedTemporaryFile(mode="w", suffix=".json5", delete=False, encoding="utf-8") as config_file:
             config_file.write(config_json)
             config_path = config_file.name
@@ -157,7 +160,7 @@ def run(
         from Backtest.Engine.backtester import load_backtest_frames  # type: ignore
         from Backtest.Engine.ohlcv_cache import CachingMariaAPI  # type: ignore
 
-        trend_overrides = _toml("Strategy").get("assets", {})
+        trend_overrides = (strategy_override or _toml("Strategy")).get("assets", {})
         _orig_resolve_trend_params = _trend_detector.resolve_trend_params
 
         def _rebuilt_trend_params(asset: str | None = None) -> dict:
@@ -212,7 +215,7 @@ def run(
                 config_path,
                 progress=progress,
                 monte_carlo_progress=monte_carlo_progress,
-                maria_api=CachingMariaAPI(cache_dir=cache_dir),
+                maria_api=maria_api or CachingMariaAPI(cache_dir=cache_dir),
             )
         finally:
             _bt.build_final_strategy_dataframe = _seq_build

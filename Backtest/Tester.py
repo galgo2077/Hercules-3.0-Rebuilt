@@ -61,6 +61,32 @@ def _progress_ctx():
 
 check("BacktestProgress context", _progress_ctx)
 
+
+# 5. Auto tuner only samples contiguous 50% real-candle windows
+def _tuner_paths():
+    from datetime import timedelta
+
+    from Backtest.Tuner import _paths
+
+    paths = _paths(
+        {"start_date": "2020-01-01T00:00:00Z", "end_date": "2022-01-01T00:00:00Z"},
+        {"training_fraction": 0.5, "paths": 3, "seed": 42},
+    )
+    if len(paths) != 3:
+        raise AssertionError(f"expected 3 paths, got {len(paths)}")
+    for start, end in paths:
+        if _date(end) - _date(start) != timedelta(days=365, hours=12):
+            raise AssertionError(f"path is not 50% of source range: {start} to {end}")
+
+
+def _date(value):
+    from datetime import datetime
+
+    return datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+
+check("Auto tuner uses 50% candle windows", _tuner_paths)
+
 # 5. Full backtest (slow)
 if "--full" in sys.argv:
     total += 1
