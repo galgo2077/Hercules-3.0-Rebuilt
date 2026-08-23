@@ -5,8 +5,8 @@
 <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
 </head><body>
 <header class="topbar"><strong>Hercules 3.0<br>Monitor</strong><a href="/accounts.html">⇄ Accounts</a>
-<select id="asset"><option>BTCUSDT</option></select><button id="logout">Log out</button><span id="error"></span>
-<b id="bot" class="badge">UNKNOWN</b><b id="account" class="badge">ACCOUNT —</b><b id="kill" class="badge">KILL —</b><button id="killButton" class="danger">Activate kill</button></header>
+<select id="account" aria-label="Exchange account"><option value="">Account</option></select><select id="asset" aria-label="Trading asset"><option>BTCUSDT</option></select><button id="logout">Log out</button><span id="error"></span>
+<b id="bot" class="badge">UNKNOWN</b><b id="accountBadge" class="badge">ACCOUNT —</b><b id="kill" class="badge">KILL —</b><button id="killButton" class="danger">Activate kill</button></header>
 <nav><button class="tab active" data-panel="summary">Summary</button><button class="tab" data-panel="chart">Chart</button><button class="tab" data-panel="trades">Trades</button><button class="tab test" data-panel="testing">Testing</button></nav>
 <section id="summary" class="panel active"><div id="cards" class="grid"></div></section>
 <section id="chart" class="panel"><div class="toolbar"><span>Interval</span><button data-interval="1m">1m</button><button data-interval="5m">5m</button><button data-interval="15m">15m</button><button data-interval="1h" class="active">1h</button><button data-interval="4h">4h</button><button data-interval="1d">1d</button></div><div id="ohlc">O —　H —　L —　C —　V —</div><div id="chartPlot"></div></section>

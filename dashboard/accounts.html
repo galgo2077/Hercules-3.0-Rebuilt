@@ -1,0 +1,11 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Hercules 3.0 Accounts</title><link rel="stylesheet" href="/monitor.css"></head>
+<body><header class="topbar"><strong>Hercules 3.0<br>Accounts</strong><a href="/">← Monitor</a><button id="logout">Log out</button><span id="error"></span></header>
+<main class="tablewrap account-page"><table><thead><tr><th>Label</th><th>Environment</th><th>Created</th><th>Open</th><th>Action</th></tr></thead><tbody id="accounts"><tr><td colspan="5">Loading accounts…</td></tr></tbody></table></main>
+<script>
+const token=()=>localStorage.getItem('access_token');
+const request=(path,options={})=>fetch(path,{...options,headers:{Authorization:`Bearer ${token()}`,...options.headers}}).then(async response=>{if(response.status===401){location='/login.html';throw Error('Session expired')}if(!response.ok)throw Error(`${path} -> ${response.status}`);return response.status===204?null:response.json()});
+const escapeHtml=value=>String(value??'').replace(/[&<>"']/g,character=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[character]));
+async function loadAccounts(){try{const accounts=await request('/api/accounts');const body=document.getElementById('accounts');body.innerHTML=accounts.length?accounts.map(account=>`<tr><td>${escapeHtml(account.label||'Unnamed')}</td><td>${escapeHtml(String(account.environment||'unknown').toUpperCase())}</td><td>${escapeHtml(account.created_at||'—')}</td><td><a href="/?account=${encodeURIComponent(account.id)}">Open monitor</a></td><td><button data-delete="${escapeHtml(account.id)}">Delete</button></td></tr>`).join(''):'<tr><td colspan="5">No accounts registered</td></tr>';body.querySelectorAll('[data-delete]').forEach(button=>button.onclick=async()=>{if(!confirm('Delete this exchange account?'))return;await request(`/api/accounts/${encodeURIComponent(button.dataset.delete)}`,{method:'DELETE'});loadAccounts()})}catch(error){document.getElementById('error').textContent=error.message}}
+document.getElementById('logout').onclick=()=>{localStorage.clear();location='/login.html'};loadAccounts();
+</script></body></html>

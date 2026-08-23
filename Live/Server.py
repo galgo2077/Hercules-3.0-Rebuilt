@@ -11,6 +11,7 @@ import uvicorn
 from fastapi import Depends, FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from Live.Auth import AuthUser, require_auth
@@ -23,6 +24,14 @@ _STATIC = _ROOT / "dashboard"
 
 def _records(data: object) -> list[dict]:
     return [dict(row) for row in data if isinstance(row, dict)] if isinstance(data, list) else []
+
+
+def _owned_account_ids(user_id: str) -> list[str]:
+    """Return account IDs belonging to one authenticated user."""
+    from SharedParams.Supabase import get_service_client
+
+    response = get_service_client().table("exchange_accounts").select("id").eq("user_id", user_id).execute()
+    return [str(row["id"]) for row in _records(response.data) if row.get("id")]
 
 
 def _security_cfg() -> dict:
@@ -84,12 +93,57 @@ async def get_config(user: _User) -> dict[str, Any]:
 
 
 @app.get("/api/dashboard")
-async def get_dashboard(user: _User) -> dict[str, Any]:
+async def get_dashboard(user: _User, account: str | None = None) -> dict[str, Any]:
     """Return the monitor's read-only, user-scoped aggregate data."""
     from Live.DashboardData import build_dashboard
     from SharedParams.Config import load
 
-    return build_dashboard(user.id, load().portfolio.leverage)
+    cfg = load()
+    return build_dashboard(user.id, cfg.portfolio.leverage, cfg.backtest.assets, account)
+
+
+@app.get("/api/databases")
+async def list_databases(user: _User) -> list[dict[str, Any]]:
+    """Compatibility endpoint: expose user accounts as selectable databases."""
+    from SharedParams.Supabase import get_client
+
+    response = get_client().table("exchange_accounts").select("id,label,environment").eq("user_id", user.id).execute()
+    return [{"id": row["id"], "label": row.get("label", ""), "environment": row.get("environment", "testnet")} for row in _records(response.data) if row.get("id")]
+
+
+@app.get("/api/assets")
+async def list_assets(user: _User) -> list[str]:
+    """Return configured and observed assets for the authenticated user."""
+    from SharedParams.Config import load
+    from SharedParams.Supabase import get_client
+
+    cfg = load()
+    client = get_client()
+    accounts = client.table("exchange_accounts").select("id").eq("user_id", user.id).execute()
+    observed: set[str] = set()
+    for account in _records(accounts.data):
+        response = client.table("trades").select("asset").eq("account_id", account["id"]).execute()
+        observed.update(str(row["asset"]) for row in _records(response.data) if row.get("asset"))
+    return sorted({*cfg.backtest.assets, *observed})
+
+
+@app.get("/api/stats")
+async def get_stats(user: _User, account: str | None = None) -> dict[str, Any]:
+    """Compatibility endpoint exposing the monitor statistics object."""
+    from Live.DashboardData import build_dashboard
+    from SharedParams.Config import load
+
+    cfg = load()
+    return build_dashboard(user.id, cfg.portfolio.leverage, cfg.backtest.assets, account)["stats"]
+
+
+@app.get("/accounts", include_in_schema=False)
+async def accounts_page() -> FileResponse:
+    """Serve account selector page before SPA fallback can shadow the route."""
+    page = _STATIC / "accounts.html"
+    if not page.exists():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="accounts page unavailable")
+    return FileResponse(page)
 
 
 # ── Trades ────────────────────────────────────────────────────────────────────
@@ -97,10 +151,10 @@ async def get_dashboard(user: _User) -> dict[str, Any]:
 
 @app.get("/api/trades")
 async def list_trades(user: _User, limit: int = 50) -> list[dict]:
-    from SharedParams.Supabase import get_client
+    from SharedParams.Supabase import get_service_client
 
-    resp = get_client().table("trades").select("*").order("entry_time", desc=True).limit(limit).execute()
-    return _records(resp.data)
+    client = get_service_client()
+    return [trade for account_id in _owned_account_ids(user.id) for trade in _records(client.table("trades").select("*").eq("account_id", account_id).order("entry_time", desc=True).limit(limit).execute())][:limit]
 
 
 @app.delete("/api/trades/{trade_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -115,10 +169,10 @@ async def delete_trade(trade_id: int, user: _User) -> None:
 
 @app.get("/api/positions")
 async def get_positions(user: _User) -> list[dict]:
-    from SharedParams.Supabase import get_client
+    from SharedParams.Supabase import get_service_client
 
-    resp = get_client().table("live_positions").select("*").execute()
-    return _records(resp.data)
+    client = get_service_client()
+    return [position for account_id in _owned_account_ids(user.id) for position in _records(client.table("live_positions").select("*").eq("account_id", account_id).execute())]
 
 
 # ── Equity ────────────────────────────────────────────────────────────────────
@@ -126,10 +180,11 @@ async def get_positions(user: _User) -> list[dict]:
 
 @app.get("/api/equity")
 async def get_equity(user: _User, limit: int = 200) -> list[dict]:
-    from SharedParams.Supabase import get_client
+    from SharedParams.Supabase import get_service_client
 
-    resp = get_client().table("equity_snapshots").select("*").order("ts", desc=True).limit(limit).execute()
-    return list(reversed(_records(resp.data)))
+    client = get_service_client()
+    rows = [point for account_id in _owned_account_ids(user.id) for point in _records(client.table("equity_snapshots").select("*").eq("account_id", account_id).order("ts", desc=True).limit(limit).execute())]
+    return list(reversed(rows[:limit]))
 
 
 # ── Candles ───────────────────────────────────────────────────────────────────

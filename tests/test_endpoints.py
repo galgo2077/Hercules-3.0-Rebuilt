@@ -69,6 +69,13 @@ def client_admin(monkeypatch, tmp_path):
 
 # ── Status ────────────────────────────────────────────────────────────────────
 
+def test_dashboard_returns_snapshot(client_user, monkeypatch):
+    monkeypatch.setattr("SharedParams.Supabase.get_service_client", lambda: FakeSupabase([]))
+    r = client_user.get("/api/dashboard")
+    assert r.status_code == 200
+    assert "stats" in r.json()
+
+
 def test_status_ok(client_user):
     r = client_user.get("/api/status")
     assert r.status_code == 200
@@ -126,14 +133,14 @@ def test_kill_active_shows_in_status(client_admin):
 
 def test_trades_returns_list(client_user, monkeypatch):
     fake_data = [{"id": 1, "asset": "BTCUSDT", "side": "long"}]
-    monkeypatch.setattr("SharedParams.Supabase.get_client", lambda: FakeSupabase(fake_data))
+    monkeypatch.setattr("SharedParams.Supabase.get_service_client", lambda: FakeSupabase(fake_data))
     r = client_user.get("/api/trades")
     assert r.status_code == 200
     assert isinstance(r.json(), list)
 
 
 def test_trades_empty(client_user, monkeypatch):
-    monkeypatch.setattr("SharedParams.Supabase.get_client", lambda: FakeSupabase([]))
+    monkeypatch.setattr("SharedParams.Supabase.get_service_client", lambda: FakeSupabase([]))
     r = client_user.get("/api/trades")
     assert r.status_code == 200
     assert r.json() == []
@@ -148,7 +155,7 @@ def test_delete_trade_204(client_user, monkeypatch):
 # ── Positions ─────────────────────────────────────────────────────────────────
 
 def test_positions_returns_list(client_user, monkeypatch):
-    monkeypatch.setattr("SharedParams.Supabase.get_client",
+    monkeypatch.setattr("SharedParams.Supabase.get_service_client",
                         lambda: FakeSupabase([{"asset": "BTCUSDT", "side": "LONG"}]))
     r = client_user.get("/api/positions")
     assert r.status_code == 200
@@ -158,7 +165,7 @@ def test_positions_returns_list(client_user, monkeypatch):
 # ── Equity ────────────────────────────────────────────────────────────────────
 
 def test_equity_returns_list(client_user, monkeypatch):
-    monkeypatch.setattr("SharedParams.Supabase.get_client",
+    monkeypatch.setattr("SharedParams.Supabase.get_service_client",
                         lambda: FakeSupabase([{"ts": "2024-01-01T00:00:00", "equity": 10000.0}]))
     r = client_user.get("/api/equity")
     assert r.status_code == 200
