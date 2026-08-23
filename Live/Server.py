@@ -83,6 +83,15 @@ async def get_config(user: _User) -> dict[str, Any]:
     }
 
 
+@app.get("/api/dashboard")
+async def get_dashboard(user: _User) -> dict[str, Any]:
+    """Return the monitor's read-only, user-scoped aggregate data."""
+    from Live.DashboardData import build_dashboard
+    from SharedParams.Config import load
+
+    return build_dashboard(user.id, load().portfolio.leverage)
+
+
 # ── Trades ────────────────────────────────────────────────────────────────────
 
 

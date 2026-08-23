@@ -1,116 +1,16 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Hercules — Dashboard</title>
-<style>
-*{box-sizing:border-box;margin:0;padding:0}
-body{background:#0d0d0d;color:#e0e0e0;font-family:monospace;font-size:.85rem}
-header{background:#111;border-bottom:1px solid #2a2a2a;padding:.8rem 1.5rem;display:flex;align-items:center;justify-content:space-between}
-header h1{font-size:1rem;letter-spacing:.15em;color:#fff}
-header .actions{display:flex;gap:.8rem}
-button{background:#1e1e1e;border:1px solid #333;color:#ccc;padding:.4rem .9rem;font-family:monospace;font-size:.8rem;cursor:pointer}
-button:hover{background:#2a2a2a}
-button.danger{border-color:#6b2020;color:#e55}
-.grid{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:#1a1a1a;padding:1px;margin:1rem}
-.panel{background:#111;padding:1rem}
-.panel h2{font-size:.75rem;color:#666;letter-spacing:.1em;margin-bottom:.8rem}
-.stat{display:flex;justify-content:space-between;padding:.3rem 0;border-bottom:1px solid #1a1a1a}
-.stat .val{color:#fff}
-.kill-on{color:#e55;font-weight:bold}
-table{width:100%;border-collapse:collapse}
-th{color:#555;font-size:.7rem;text-align:left;padding:.4rem .5rem;border-bottom:1px solid #222}
-td{padding:.4rem .5rem;border-bottom:1px solid #1a1a1a;color:#ccc}
-td.win{color:#4e4}
-td.loss{color:#e55}
-#kill-btn{display:none}
-</style>
-</head>
-<body>
-<header>
-  <h1>HERCULES 3.0</h1>
-  <div class="actions">
-    <span id="kill-status"></span>
-    <button class="danger" id="kill-btn" onclick="toggleKill()">KILL SWITCH</button>
-    <button onclick="logout()">LOGOUT</button>
-  </div>
-</header>
-
-<div class="grid">
-  <div class="panel">
-    <h2>STATUS</h2>
-    <div id="status-panel"><div class="stat"><span>loading…</span></div></div>
-  </div>
-  <div class="panel">
-    <h2>POSITIONS</h2>
-    <div id="positions-panel"><div class="stat"><span>loading…</span></div></div>
-  </div>
-  <div class="panel" style="grid-column:1/-1">
-    <h2>TRADES</h2>
-    <div id="trades-panel"><table><tr><td>loading…</td></tr></table></div>
-  </div>
-</div>
-
-<script>
-const token=()=>localStorage.getItem('access_token');
-const hdrs=()=>({'Authorization':'Bearer '+token(),'Content-Type':'application/json'});
-
-async function api(path,opts={}){
-  const r=await fetch(path,{headers:hdrs(),...opts});
-  if(r.status===401){window.location='/login.html';return null;}
-  return r.ok?r.json():null;
-}
-
-async function load(){
-  const [st,pos,trades]=await Promise.all([
-    api('/api/status'),api('/api/positions'),api('/api/trades')
-  ]);
-
-  if(st){
-    const ks=st.kill_switch;
-    document.getElementById('kill-status').textContent=ks?'⚠ KILL ACTIVE':'';
-    document.getElementById('kill-status').className=ks?'kill-on':'';
-    document.getElementById('kill-btn').style.display='inline';
-    document.getElementById('status-panel').innerHTML=
-      `<div class="stat"><span>Kill switch</span><span class="val ${ks?'kill-on':''}">${ks?'ON':'off'}</span></div>
-       <div class="stat"><span>User</span><span class="val">${st.user.slice(0,8)}…</span></div>`;
-  }
-
-  if(pos&&pos.length){
-    document.getElementById('positions-panel').innerHTML=pos.map(p=>
-      `<div class="stat"><span>${p.asset}</span><span class="val">${p.side} ${Number(p.size_usdt).toFixed(2)} USDT</span></div>`
-    ).join('');
-  } else {
-    document.getElementById('positions-panel').innerHTML='<div class="stat"><span>No open positions</span></div>';
-  }
-
-  if(trades&&trades.length){
-    document.getElementById('trades-panel').innerHTML=
-      `<table><thead><tr><th>ASSET</th><th>SIDE</th><th>ENTRY</th><th>EXIT</th><th>PNL</th><th>OUTCOME</th></tr></thead><tbody>`+
-      trades.slice(0,20).map(t=>
-        `<tr><td>${t.asset}</td><td>${t.side}</td><td>${(t.entry_price||0).toFixed(4)}</td><td>${(t.exit_price||0).toFixed(4)}</td><td>${(t.pnl||0).toFixed(4)}</td><td class="${t.outcome}">${t.outcome||'open'}</td></tr>`
-      ).join('')+'</tbody></table>';
-  } else {
-    document.getElementById('trades-panel').innerHTML='<table><tr><td>No trades</td></tr></table>';
-  }
-}
-
-async function toggleKill(){
-  const st=await api('/api/kill');
-  if(!st)return;
-  const path=st.active?'/api/kill/reset':'/api/kill/activate';
-  await api(path,{method:'POST'});
-  load();
-}
-
-async function logout(){
-  await api('/api/auth/logout',{method:'POST'});
-  localStorage.clear();
-  window.location='/login.html';
-}
-
-if(!token()){window.location='/login.html';}else{load();setInterval(load,15000);}
-</script>
-</body>
-</html>
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Hercules 3.0 Monitor</title><link rel="stylesheet" href="/monitor.css">
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+</head><body>
+<header class="topbar"><strong>Hercules 3.0<br>Monitor</strong><a href="/accounts.html">⇄ Accounts</a>
+<select id="asset"><option>BTCUSDT</option></select><button id="logout">Log out</button><span id="error"></span>
+<b id="bot" class="badge">UNKNOWN</b><b id="account" class="badge">ACCOUNT —</b><b id="kill" class="badge">KILL —</b><button id="killButton" class="danger">Activate kill</button></header>
+<nav><button class="tab active" data-panel="summary">Summary</button><button class="tab" data-panel="chart">Chart</button><button class="tab" data-panel="trades">Trades</button><button class="tab test" data-panel="testing">Testing</button></nav>
+<section id="summary" class="panel active"><div id="cards" class="grid"></div></section>
+<section id="chart" class="panel"><div class="toolbar"><span>Interval</span><button data-interval="1m">1m</button><button data-interval="5m">5m</button><button data-interval="15m">15m</button><button data-interval="1h" class="active">1h</button><button data-interval="4h">4h</button><button data-interval="1d">1d</button></div><div id="ohlc">O —　H —　L —　C —　V —</div><div id="chartPlot"></div></section>
+<section id="trades" class="panel"><div class="tablewrap"><table><thead><tr><th>Time</th><th>Symbol</th><th>Side</th><th>Qty</th><th>Entry</th><th>Exit</th><th>PnL</th><th>Status</th></tr></thead><tbody id="tradeRows"></tbody></table></div></section>
+<section id="testing" class="panel"><div class="testbox"><button disabled>▶ Long &amp; Short</button><button id="refresh">↻ Refresh trades</button><span>Order test disabled. Explicit order authorization required.</span></div></section>
+<footer>Last updated: <span id="updated">—</span></footer><script src="/monitor.js"></script>
+</body></html>
