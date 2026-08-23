@@ -105,9 +105,9 @@ async def get_dashboard(user: _User, account: str | None = None) -> dict[str, An
 @app.get("/api/databases")
 async def list_databases(user: _User) -> list[dict[str, Any]]:
     """Compatibility endpoint: expose user accounts as selectable databases."""
-    from SharedParams.Supabase import get_client
+    from SharedParams.Supabase import get_service_client
 
-    response = get_client().table("exchange_accounts").select("id,label,environment").eq("user_id", user.id).execute()
+    response = get_service_client().table("exchange_accounts").select("id,label,environment").eq("user_id", user.id).execute()
     return [{"id": row["id"], "label": row.get("label", ""), "environment": row.get("environment", "testnet")} for row in _records(response.data) if row.get("id")]
 
 
@@ -115,10 +115,10 @@ async def list_databases(user: _User) -> list[dict[str, Any]]:
 async def list_assets(user: _User) -> list[str]:
     """Return configured and observed assets for the authenticated user."""
     from SharedParams.Config import load
-    from SharedParams.Supabase import get_client
+    from SharedParams.Supabase import get_service_client
 
     cfg = load()
-    client = get_client()
+    client = get_service_client()
     accounts = client.table("exchange_accounts").select("id").eq("user_id", user.id).execute()
     observed: set[str] = set()
     for account in _records(accounts.data):

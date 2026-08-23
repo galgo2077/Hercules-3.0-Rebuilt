@@ -26,9 +26,9 @@ class AddAccountRequest(BaseModel):
 
 @router.get("")
 async def list_accounts(user: _User) -> list[dict]:
-    from SharedParams.Supabase import get_client
+    from SharedParams.Supabase import get_service_client
 
-    resp = get_client().table("exchange_accounts").select("id,label,environment,created_at").eq("user_id", user.id).order("created_at", desc=True).execute()
+    resp = get_service_client().table("exchange_accounts").select("id,label,environment,created_at").eq("user_id", user.id).order("created_at", desc=True).execute()
     return _records(resp.data)
 
 
