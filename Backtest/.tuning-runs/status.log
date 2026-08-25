@@ -1,0 +1,68 @@
+2026-08-22 21:10:25 CST
+lane-101.log {"candidate": 5, "passed": false, "worst_drawdown_pct": -97.00911883920257, "worst_roi_pct": -56.77091259550444, "worst_roi_to_drawdown": -0.6569202785044497, "worst_win_rate": 0.6305732484076433}
+lane-202.log {"candidate": 5, "passed": false, "worst_drawdown_pct": -99.36025743908617, "worst_roi_pct": -75.89757458491036, "worst_roi_to_drawdown": -0.7943534304893296, "worst_win_rate": 0.647887323943662}
+lane-303.log {"candidate": 5, "passed": false, "worst_drawdown_pct": -68.70101463901807, "worst_roi_pct": -47.30860122343593, "worst_roi_to_drawdown": -0.6886157573074252, "worst_win_rate": 0.5476190476190477}
+lane-404.log {"candidate": 5, "passed": false, "worst_drawdown_pct": -118.5982292071962, "worst_roi_pct": -96.58889986945485, "worst_roi_to_drawdown": -0.8840130736940134, "worst_win_rate": 0.6074766355140186}
+lane-505.log {"candidate": 4, "passed": false, "worst_drawdown_pct": -67.6582120747144, "worst_roi_pct": -43.66906937799609, "worst_roi_to_drawdown": -0.6454363489501127, "worst_win_rate": 0.625}
+2026-08-22 21:15:25 CST
+lane-101.log {"candidate": 8, "passed": false, "worst_drawdown_pct": -63.82769858480006, "worst_roi_pct": -35.368665041454136, "worst_roi_to_drawdown": -0.554127217895286, "worst_win_rate": 0.6582278481012658}
+lane-202.log {"candidate": 8, "passed": false, "worst_drawdown_pct": -112.9965355806025, "worst_roi_pct": -79.61037775515929, "worst_roi_to_drawdown": -0.7045382174427087, "worst_win_rate": 0.6159420289855072}
+lane-303.log {"candidate": 9, "passed": false, "worst_drawdown_pct": -114.46626559659873, "worst_roi_pct": -96.47548368628797, "worst_roi_to_drawdown": -0.9480421947561255, "worst_win_rate": 0.61875}
+lane-404.log {"candidate": 8, "passed": false, "worst_drawdown_pct": -64.19794555205358, "worst_roi_pct": -48.475921643290455, "worst_roi_to_drawdown": -0.7551008249007712, "worst_win_rate": 0.5774647887323944}
+lane-505.log {"candidate": 8, "passed": false, "worst_drawdown_pct": -88.90293810457044, "worst_roi_pct": -69.3629755797408, "worst_roi_to_drawdown": -0.7802101601878881, "worst_win_rate": 0.6467065868263473}
+2026-08-22 21:20:25 CST
+lane-101.log {"candidate": 13, "passed": false, "worst_drawdown_pct": -97.4699116622576, "worst_roi_pct": -65.2008102091906, "worst_roi_to_drawdown": -0.6689326900707322, "worst_win_rate": 0.6530612244897959}
+lane-202.log {"candidate": 12, "passed": false, "worst_drawdown_pct": -86.44294146065826, "worst_roi_pct": -64.85324401602853, "worst_roi_to_drawdown": -0.7502433734921481, "worst_win_rate": 0.6391752577319587}
+lane-303.log {"candidate": 13, "passed": false, "worst_drawdown_pct": -142.34123116973728, "worst_roi_pct": -88.987082122857, "worst_roi_to_drawdown": -0.8223551594685281, "worst_win_rate": 0.6346153846153846}
+lane-404.log {"candidate": 12, "passed": false, "worst_drawdown_pct": -103.84754289633598, "worst_roi_pct": -85.27261185588998, "worst_roi_to_drawdown": -0.8211326862207216, "worst_win_rate": 0.6095238095238096}
+lane-505.log {"candidate": 12, "passed": false, "worst_drawdown_pct": -86.99218691242116, "worst_roi_pct": -61.745860651823094, "worst_roi_to_drawdown": -0.7688251407640705, "worst_win_rate": 0.6194690265486725}
+2026-08-22 21:25:25 CST
+lane-101.log {"candidate": 16, "passed": false, "worst_drawdown_pct": -102.65539602085826, "worst_roi_pct": -71.94808432577877, "worst_roi_to_drawdown": -0.7144512954164363, "worst_win_rate": 0.6036585365853658}
+lane-202.log {"candidate": 16, "passed": false, "worst_drawdown_pct": -87.92107133675648, "worst_roi_pct": -46.13814108323384, "worst_roi_to_drawdown": -0.5597333734399765, "worst_win_rate": 0.6645161290322581}
+lane-303.log {"candidate": 17, "passed": false, "worst_drawdown_pct": -67.7113138792144, "worst_roi_pct": 27.145156915303037, "worst_roi_to_drawdown": 0.4008954391835526, "worst_win_rate": 0.6695652173913044}
+lane-404.log {"candidate": 16, "passed": false, "worst_drawdown_pct": -74.92401975122064, "worst_roi_pct": -47.44889917551412, "worst_roi_to_drawdown": -0.6332935597030763, "worst_win_rate": 0.6473684210526316}
+lane-505.log {"candidate": 16, "passed": false, "worst_drawdown_pct": -51.206273306594404, "worst_roi_pct": -34.267618273891436, "worst_roi_to_drawdown": -0.6692074244246634, "worst_win_rate": 0.5454545454545454}
+2026-08-22 21:30:25 CST
+lane-101.log {"candidate": 21, "passed": false, "worst_drawdown_pct": -112.97676693940562, "worst_roi_pct": -91.80074674618682, "worst_roi_to_drawdown": -0.8180029402389433, "worst_win_rate": 0.5319148936170213}
+lane-202.log {"candidate": 20, "passed": false, "worst_drawdown_pct": -72.39587231971089, "worst_roi_pct": -63.10092788275059, "worst_roi_to_drawdown": -0.9045274608395578, "worst_win_rate": 0.5606060606060606}
+lane-303.log {"candidate": 21, "passed": false, "worst_drawdown_pct": -100.16241999366797, "worst_roi_pct": -58.5847501633762, "worst_roi_to_drawdown": -0.5903462903374829, "worst_win_rate": 0.6346153846153846}
+lane-404.log {"candidate": 20, "passed": false, "worst_drawdown_pct": -106.41123322153128, "worst_roi_pct": -68.91337598332936, "worst_roi_to_drawdown": -0.7842860839813462, "worst_win_rate": 0.6428571428571429}
+lane-505.log {"candidate": 20, "passed": false, "worst_drawdown_pct": -115.119656686394, "worst_roi_pct": -100.77424808438249, "worst_roi_to_drawdown": -0.8753869754746498, "worst_win_rate": 0.6224489795918368}
+2026-08-22 21:35:25 CST
+lane-101.log {"candidate": 25, "passed": false, "worst_drawdown_pct": -58.724214153040165, "worst_roi_pct": -34.763311290582244, "worst_roi_to_drawdown": -0.6358810734515785, "worst_win_rate": 0.6636363636363637}
+lane-202.log {"candidate": 24, "passed": false, "worst_drawdown_pct": -89.37585600889511, "worst_roi_pct": -52.40677195369092, "worst_roi_to_drawdown": -0.5863638603749445, "worst_win_rate": 0.6589595375722543}
+lane-303.log {"candidate": 25, "passed": false, "worst_drawdown_pct": -58.846459328882084, "worst_roi_pct": -5.019823832266876, "worst_roi_to_drawdown": -0.10670430164447005, "worst_win_rate": 0.6583850931677019}
+lane-404.log {"candidate": 24, "passed": false, "worst_drawdown_pct": -78.17039619580146, "worst_roi_pct": -23.711184836808645, "worst_roi_to_drawdown": -0.3033269113465511, "worst_win_rate": 0.6172839506172839}
+lane-505.log {"candidate": 24, "passed": false, "worst_drawdown_pct": -163.67064397614496, "worst_roi_pct": -136.07495334852874, "worst_roi_to_drawdown": -0.8313949896131753, "worst_win_rate": 0.6273291925465838}
+2026-08-22 21:40:25 CST
+lane-101.log {"candidate": 29, "passed": false, "worst_drawdown_pct": -94.49294800276671, "worst_roi_pct": -52.87145437393106, "worst_roi_to_drawdown": -0.5595280440650767, "worst_win_rate": 0.6201923076923077}
+lane-202.log {"candidate": 28, "passed": false, "worst_drawdown_pct": -126.71555322673349, "worst_roi_pct": -98.02224084624049, "worst_roi_to_drawdown": -0.8996929568936259, "worst_win_rate": 0.6023391812865497}
+lane-303.log {"candidate": 29, "passed": false, "worst_drawdown_pct": -66.5239568400993, "worst_roi_pct": -26.35666441742646, "worst_roi_to_drawdown": -0.43630263531085106, "worst_win_rate": 0.6030534351145038}
+lane-404.log {"candidate": 29, "passed": false, "worst_drawdown_pct": -57.26114184273122, "worst_roi_pct": -4.63999845864694, "worst_roi_to_drawdown": -0.08103223773271552, "worst_win_rate": 0.7310344827586207}
+lane-505.log {"candidate": 28, "passed": false, "worst_drawdown_pct": -59.43558238408663, "worst_roi_pct": -46.299888863227984, "worst_roi_to_drawdown": -0.7971238975678095, "worst_win_rate": 0.6459627329192547}
+2026-08-22 21:45:25 CST
+lane-101.log {"candidate": 33, "passed": false, "worst_drawdown_pct": -61.333889041280564, "worst_roi_pct": -2.291018464599752, "worst_roi_to_drawdown": -0.03735322348559684, "worst_win_rate": 0.6605504587155964}
+lane-202.log {"candidate": 33, "passed": false, "worst_drawdown_pct": -93.4368154259311, "worst_roi_pct": -76.76028209820397, "worst_roi_to_drawdown": -0.8215207437057089, "worst_win_rate": 0.6277777777777778}
+lane-303.log {"candidate": 33, "passed": false, "worst_drawdown_pct": -75.21610809157502, "worst_roi_pct": -30.480706574259326, "worst_roi_to_drawdown": -0.48327676775288, "worst_win_rate": 0.6638655462184874}
+lane-404.log {"candidate": 33, "passed": false, "worst_drawdown_pct": -44.18414911573781, "worst_roi_pct": 8.117293121474171, "worst_roi_to_drawdown": 0.1837150490374137, "worst_win_rate": 0.6815642458100558}
+lane-505.log {"candidate": 32, "passed": false, "worst_drawdown_pct": -114.2732248524802, "worst_roi_pct": -95.59811379489823, "worst_roi_to_drawdown": -0.8365749187380472, "worst_win_rate": 0.6521739130434783}
+2026-08-22 21:50:25 CST
+lane-101.log {"candidate": 37, "passed": false, "worst_drawdown_pct": -95.28465770772033, "worst_roi_pct": -57.91484540352195, "worst_roi_to_drawdown": -0.6078087154510446, "worst_win_rate": 0.5961538461538461}
+lane-202.log {"candidate": 37, "passed": false, "worst_drawdown_pct": -90.02388987042565, "worst_roi_pct": -76.87839156766165, "worst_roi_to_drawdown": -0.8539776683535365, "worst_win_rate": 0.6223776223776224}
+lane-303.log {"candidate": 37, "passed": false, "worst_drawdown_pct": -113.2439460376339, "worst_roi_pct": -63.34301622367584, "worst_roi_to_drawdown": -0.8016578215896782, "worst_win_rate": 0.6354679802955665}
+lane-404.log {"candidate": 37, "passed": false, "worst_drawdown_pct": -73.1252611944173, "worst_roi_pct": -35.10652679328575, "worst_roi_to_drawdown": -0.5235614800366704, "worst_win_rate": 0.6558441558441559}
+lane-505.log {"candidate": 37, "passed": false, "worst_drawdown_pct": -96.98758079769476, "worst_roi_pct": -74.86243672937121, "worst_roi_to_drawdown": -0.7718765239183136, "worst_win_rate": 0.668918918918919}
+2026-08-22 21:55:25 CST
+lane-101.log {"candidate": 41, "passed": false, "worst_drawdown_pct": -82.52479422589872, "worst_roi_pct": -45.61833826317348, "worst_roi_to_drawdown": -0.6352556405831629, "worst_win_rate": 0.577922077922078}
+lane-202.log {"candidate": 41, "passed": false, "worst_drawdown_pct": -110.06837379892195, "worst_roi_pct": -79.74904729574449, "worst_roi_to_drawdown": -0.7245409788776727, "worst_win_rate": 0.6542056074766355}
+lane-303.log {"candidate": 41, "passed": false, "worst_drawdown_pct": -49.92299780345394, "worst_roi_pct": -21.46098628474941, "worst_roi_to_drawdown": -0.4298817624943314, "worst_win_rate": 0.6739130434782609}
+lane-404.log {"candidate": 41, "passed": false, "worst_drawdown_pct": -48.42370571747383, "worst_roi_pct": -25.311431518902978, "worst_roi_to_drawdown": -0.5227074455346625, "worst_win_rate": 0.7117117117117117}
+lane-505.log {"candidate": 41, "passed": false, "worst_drawdown_pct": -106.31079106377423, "worst_roi_pct": -84.78319436116932, "worst_roi_to_drawdown": -0.8428615239990965, "worst_win_rate": 0.6055045871559633}
+2026-08-22 22:00:25 CST
+lane-101.log {"candidate": 45, "passed": false, "worst_drawdown_pct": -84.92207124047991, "worst_roi_pct": -68.00035929295578, "worst_roi_to_drawdown": -0.800738351051216, "worst_win_rate": 0.5774647887323944}
+lane-202.log {"candidate": 45, "passed": false, "worst_drawdown_pct": -95.94898166798036, "worst_roi_pct": -81.60569462652538, "worst_roi_to_drawdown": -0.8505113155751026, "worst_win_rate": 0.6467391304347826}
+lane-303.log {"candidate": 45, "passed": false, "worst_drawdown_pct": -102.14290578947316, "worst_roi_pct": -80.44043073280062, "worst_roi_to_drawdown": -0.7875283174202667, "worst_win_rate": 0.6132075471698113}
+lane-404.log {"candidate": 45, "passed": false, "worst_drawdown_pct": -86.92815440263105, "worst_roi_pct": -50.421206300956754, "worst_roi_to_drawdown": -0.6418945618177743, "worst_win_rate": 0.6516129032258065}
+lane-505.log {"candidate": 45, "passed": false, "worst_drawdown_pct": -47.293518133695514, "worst_roi_pct": -21.3245868054487, "worst_roi_to_drawdown": -0.45089872031016126, "worst_win_rate": 0.6625766871165644}
+2026-08-22 22:05:25 CST
+all tuner lanes exited

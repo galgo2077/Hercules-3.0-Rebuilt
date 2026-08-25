@@ -1,0 +1,104 @@
+[
+  {
+    "bearish_bars": 1,
+    "btc": {
+      "number_of_trades": 73,
+      "win_rate": 0.6164383561643836,
+      "win_longs_pct": 0.75,
+      "win_shorts_pct": 0.4864864864864865,
+      "roi": 0.9903140480662248,
+      "max_drawdown": -0.7143465238332499
+    },
+    "total": {
+      "number_of_trades": 310,
+      "win_rate": 0.7,
+      "roi": 1.0474056365638977,
+      "max_drawdown": -0.5021184786962313
+    }
+  },
+  {
+    "bearish_bars": 2,
+    "btc": {
+      "number_of_trades": 1,
+      "win_rate": 1.0,
+      "win_longs_pct": 1.0,
+      "win_shorts_pct": 0.0,
+      "roi": 0.22283972501545327,
+      "max_drawdown": -0.15757703309590862
+    },
+    "total": {
+      "number_of_trades": 238,
+      "win_rate": 0.726890756302521,
+      "roi": 0.5869210427334349,
+      "max_drawdown": -0.28600752335445645
+    }
+  },
+  {
+    "bearish_bars": 3,
+    "btc": {
+      "number_of_trades": 1,
+      "win_rate": 1.0,
+      "win_longs_pct": 1.0,
+      "win_shorts_pct": 0.0,
+      "roi": 0.22283972501545327,
+      "max_drawdown": -0.15757703309590862
+    },
+    "total": {
+      "number_of_trades": 238,
+      "win_rate": 0.726890756302521,
+      "roi": 0.5869210427334349,
+      "max_drawdown": -0.28600752335445645
+    }
+  },
+  {
+    "bearish_bars": 4,
+    "btc": {
+      "number_of_trades": 1,
+      "win_rate": 1.0,
+      "win_longs_pct": 1.0,
+      "win_shorts_pct": 0.0,
+      "roi": 0.22283972501545327,
+      "max_drawdown": -0.15757703309590862
+    },
+    "total": {
+      "number_of_trades": 238,
+      "win_rate": 0.726890756302521,
+      "roi": 0.5869210427334349,
+      "max_drawdown": -0.28600752335445645
+    }
+  },
+  {
+    "bearish_bars": 5,
+    "btc": {
+      "number_of_trades": 1,
+      "win_rate": 1.0,
+      "win_longs_pct": 1.0,
+      "win_shorts_pct": 0.0,
+      "roi": 0.22283972501545327,
+      "max_drawdown": -0.15757703309590862
+    },
+    "total": {
+      "number_of_trades": 238,
+      "win_rate": 0.726890756302521,
+      "roi": 0.5869210427334349,
+      "max_drawdown": -0.28600752335445645
+    }
+  },
+  {
+    "bearish_bars": 6,
+    "btc": {
+      "number_of_trades": 1,
+      "win_rate": 1.0,
+      "win_longs_pct": 1.0,
+      "win_shorts_pct": 0.0,
+      "roi": 0.22283972501545327,
+      "max_drawdown": -0.15757703309590862
+    },
+    "total": {
+      "number_of_trades": 238,
+      "win_rate": 0.726890756302521,
+      "roi": 0.5869210427334349,
+      "max_drawdown": -0.28600752335445645
+    }
+  }
+]

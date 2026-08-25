@@ -1,0 +1,24 @@
+{
+  "current": {
+    "worst_roi_pct": 1.638669484142689,
+    "worst_max_drawdown_pct": -56.387117966405164,
+    "worst_roi_to_drawdown": 0.030947968794577178,
+    "worst_win_rate_pct": 64.74358974358975,
+    "trade_range": [
+      145.0,
+      157.0
+    ],
+    "mean_roi_pct": 35.65432590980589
+  },
+  "lane_303_candidate_17": {
+    "worst_roi_pct": 27.145156915303037,
+    "worst_max_drawdown_pct": -67.7113138792144,
+    "worst_roi_to_drawdown": 0.4008954391835526,
+    "worst_win_rate_pct": 66.95652173913044,
+    "trade_range": [
+      190.0,
+      230.0
+    ],
+    "mean_roi_pct": 53.31098496396986
+  }
+}
