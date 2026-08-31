@@ -9,5 +9,6 @@ WorkingDirectory=/home/galgo/Documentos/Hercules-3.0-Rebuilt
 StateDirectory=major-tom
 Environment=MAJOR_TOM_AUDIT_FILE=/var/lib/major-tom/last-audit.json
 Environment=MAJOR_TOM_TRACE_DB=/var/lib/major-tom/traces.sqlite3
+Environment=HERCULES_HEALTH_URL=http://127.0.0.1:8765/
 Environment=PYTHONPATH=/home/galgo/Documentos/Hercules-3.0-Rebuilt/.venv/lib/python3.12/site-packages
 ExecStart=/usr/bin/python3 -m major_tom.cli audit
