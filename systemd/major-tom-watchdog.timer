@@ -1,0 +1,11 @@
+[Unit]
+Description=Major Tom watchdog timer
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+Persistent=true
+Unit=major-tom-watchdog.service
+
+[Install]
+WantedBy=timers.target

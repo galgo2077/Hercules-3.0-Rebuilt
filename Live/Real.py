@@ -39,6 +39,7 @@ class RealEngine(DemoEngine):
         super().__init__(api_key=api_key, api_secret=api_secret, label=label)
         # Override rest URL to production endpoint
         self._rest_url = _REAL_REST
+        self._major_tom_environment = "PRODUCTION"
 
     def start(self) -> None:
         _assert_real_mode()

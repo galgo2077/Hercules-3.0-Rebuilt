@@ -1,0 +1,12 @@
+[Unit]
+Description=Major Tom daily audit timer
+
+[Timer]
+OnBootSec=15min
+OnUnitActiveSec=24h
+Persistent=true
+Unit=major-tom.service
+
+[Install]
+WantedBy=timers.target
+

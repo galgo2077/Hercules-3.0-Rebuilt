@@ -1,0 +1,10 @@
+[Unit]
+Description=Major Tom deterministic watchdog
+
+[Service]
+Type=oneshot
+User=galgo
+WorkingDirectory=/home/galgo/Documentos/Hercules-3.0-Rebuilt
+StateDirectory=major-tom
+Environment=MAJOR_TOM_AUDIT_FILE=/var/lib/major-tom/last-audit.json
+ExecStart=/usr/bin/python3 -m major_tom.cli watchdog

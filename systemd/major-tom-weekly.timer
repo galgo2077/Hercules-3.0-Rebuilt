@@ -1,0 +1,11 @@
+[Unit]
+Description=Major Tom weekly deep-audit trigger
+
+[Timer]
+OnBootSec=30min
+OnUnitActiveSec=7d
+Persistent=true
+Unit=major-tom-weekly.service
+
+[Install]
+WantedBy=timers.target

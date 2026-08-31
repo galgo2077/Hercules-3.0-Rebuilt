@@ -15,6 +15,7 @@ from Dataframe.CandleBuffer import CandleBuffer
 from Live._client import BinanceClient
 from Live.Positions import PositionTracker
 from Live.Risk import RiskState, check_entry, eviction_priority, on_entry, on_exit
+from major_tom.tracing import ExecutionTrace
 from Strategy.Strategy import asset_risk_params, evaluate
 
 log = logging.getLogger(__name__)
@@ -75,6 +76,7 @@ class DemoEngine:
             current_equity=cash,
             max_concurrent_shorts=int(self._pf.get("max_concurrent_shorts", 5)),
         )
+        self._major_tom_environment = "TESTNET"
 
     def _client(self) -> BinanceClient:
         return BinanceClient(self._rest_url, api_key=self._api_key, api_secret=self._api_secret)
@@ -115,6 +117,7 @@ class DemoEngine:
     async def _process_asset(self, client: BinanceClient, asset: str) -> None:
         """Build frame + evaluate strategy for one asset, then execute. Runs concurrently."""
         import polars as pl
+
         from Dataframe.Frame import build
 
         async with self._execution_lock:
@@ -131,9 +134,12 @@ class DemoEngine:
             last = decisions.filter(pl.col("asset") == asset).sort("timestamp").tail(1)
             if last.is_empty():
                 return
-            self._execute(client, last.row(0, named=True), allocs)
+            row = last.row(0, named=True)
+            trace = ExecutionTrace(self._major_tom_environment, "Hercules", asset, {"candle": rows[-1], "decision": row})
+            trace.stage("market_data", "closed market candle accepted", actual=rows[-1])
+            self._execute(client, row, allocs, trace)
 
-    def _execute(self, client: BinanceClient, row: dict, allocs: dict[str, float]) -> None:
+    def _execute(self, client: BinanceClient, row: dict, allocs: dict[str, float], trace: ExecutionTrace | None = None) -> None:
         from Live.Orders import Long, Short
 
         asset = row["asset"]
@@ -143,18 +149,24 @@ class DemoEngine:
         leverage = int(risk["leverage"] or 1)
         weight = float(self._pf.get("allocation", {}).get(asset, 0.0))
         amount = self._risk.current_equity * weight * (risk["trade_size_pct"] or 0.30) * leverage
+        trace = trace or ExecutionTrace(self._major_tom_environment, "Hercules", asset, row)
+        trace.stage("strategy_evaluated", "latest closed candle evaluated", actual={"action": action, "side": side})
 
         if action == "Entry":
             ex_side = "LONG" if side == "Long" else "SHORT"
+            trace.stage("signal_generated", "entry signal", expected={"side": ex_side, "notional": amount})
             current = self._tracker.get(asset)
             if ex_side == "SHORT" and current.side == "LONG":
                 # LONGs have no exit — reversal signal suppressed, long continues
                 log.debug("suppress SHORT reversal — LONG active on %s", asset)
+                trace.stage("filters", "long reversal policy", actual="blocked")
                 return
             allowed, reason = check_entry(self._risk, ex_side, asset, amount)
             if not allowed:
                 log.warning("entry blocked %s %s: %s", asset, ex_side, reason)
+                trace.stage("risk", reason, actual="blocked")
                 return
+            trace.stage("risk", reason, actual="approved")
             other_pos = {a: p for a, p in self._tracker.all().items() if not p.is_flat and a != asset}
             deployed = sum(p.size_usdt for p in other_pos.values())
             free = self._risk.current_equity - deployed
@@ -171,18 +183,39 @@ class DemoEngine:
                     on_exit(self._risk, victim_side)
             if side == "Long":
                 log.info("DEMO ENTRY LONG %s %.2f USDT lev=%d", asset, amount, leverage)
-                Long.enter(client, asset, amount, leverage)
+                trace.stage("sizing", "risk sizing", actual={"notional": amount, "leverage": leverage})
+                trace.stage("order_decision", "long entry approved", expected="BUY LONG")
+                try:
+                    trace.stage("binance_request", "market order sending")
+                    response = Long.enter(client, asset, amount, leverage)
+                    trace.stage("binance_ack", "market order acknowledged", actual=response)
+                    trace.stage("order_submitted", "Binance acknowledged order")
+                except Exception as exc:
+                    trace.stage("order_failed", "Binance order failed", error=exc)
+                    raise
             else:
                 log.info("DEMO ENTRY SHORT %s %.2f USDT lev=%d sl=%.3f tp=%.3f",
                          asset, amount, leverage, risk["stop_loss_pct"] or 0, risk["take_profit_pct"] or 0)
-                Short.enter(client, asset, amount, leverage,
-                            stop_loss_pct=risk["stop_loss_pct"],
-                            take_profit_pct=risk["take_profit_pct"])
+                trace.stage("sizing", "risk sizing", actual={"notional": amount, "leverage": leverage})
+                trace.stage("order_decision", "short entry approved", expected="SELL SHORT")
+                try:
+                    trace.stage("binance_request", "market order sending")
+                    response = Short.enter(client, asset, amount, leverage,
+                                           stop_loss_pct=risk["stop_loss_pct"],
+                                           take_profit_pct=risk["take_profit_pct"])
+                    trace.stage("binance_ack", "market order acknowledged", actual=response)
+                    trace.stage("order_submitted", "Binance acknowledged order")
+                except Exception as exc:
+                    trace.stage("order_failed", "Binance order failed", error=exc)
+                    raise
             self._tracker.fetch(client)
             if self._tracker.get(asset).side == ex_side:
                 on_entry(self._risk, ex_side)
+                trace.stage("fill", "exchange position confirmed", actual=ex_side)
+                trace.stage("position_reconciliation", "tracker matches entry", actual=ex_side)
             else:
                 log.error("entry confirmation mismatch %s expected=%s actual=%s", asset, ex_side, self._tracker.get(asset).side)
+                trace.stage("fill", "entry mismatch", expected=ex_side, actual=self._tracker.get(asset).side)
 
         elif row.get("exit_required"):
             pos = self._tracker.get(asset)
