@@ -6,8 +6,9 @@ import pytest
 
 
 class FakeClient:
-    def __init__(self, price: float = 50_000.0) -> None:
+    def __init__(self, price: float = 50_000.0, position_rows: list[dict] | None = None) -> None:
         self.price = price
+        self.position_rows = position_rows or []
         self.calls: list[tuple] = []
 
     def set_leverage(self, symbol: str, leverage: int) -> None:
@@ -17,6 +18,8 @@ class FakeClient:
         self.calls.append(("GET", path, kwargs))
         if "ticker/price" in path:
             return {"price": str(self.price)}
+        if "positionRisk" in path:
+            return self.position_rows
         return {}
 
     def post(self, path: str, **kwargs) -> dict:
@@ -60,7 +63,7 @@ def test_long_enter_qty_calculation():
     price = 50_000.0
     usdt = 7_200.0
     lev = 8
-    expected_qty = round(usdt * lev / price, 3)  # 1.152
+    expected_qty = round(usdt / price, 3)  # usdt_amount is leveraged notional
     c = FakeClient(price=price)
     Long.enter(c, "BTCUSDT", usdt, lev)
     market_post = next(kw for kw in c.posts() if kw.get("type") == "MARKET")
@@ -87,12 +90,27 @@ def test_long_enter_side_buy():
 
 def test_long_exit_places_close():
     from Live.Orders import Long
-    c = FakeClient()
+    c = FakeClient(position_rows=[{"symbol": "BTCUSDT", "positionSide": "LONG", "positionAmt": "0.0123456789"}])
     Long.exit(c, "BTCUSDT")
     p = c.posts()[0]
     assert p["side"] == "SELL"
     assert p["positionSide"] == "LONG"
-    assert p.get("closePosition") == "true"
+    assert p["quantity"] == 0.01234568
+
+
+def test_long_exit_uses_explicit_quantity():
+    from Live.Orders import Long
+    c = FakeClient()
+    Long.exit(c, "BTCUSDT", quantity=0.0123456789)
+    assert c.posts()[0]["quantity"] == 0.01234568
+
+
+def test_long_exit_without_position_rejects_without_post():
+    from Live.Orders import Long
+    c = FakeClient()
+    with pytest.raises(ValueError, match="no long position"):
+        Long.exit(c, "BTCUSDT")
+    assert c.posts() == []
 
 
 # ── Short entry — with SL+TP ─────────────────────────────────────────────────
@@ -221,9 +239,24 @@ def test_short_enter_sets_leverage():
 
 def test_short_exit_places_close():
     from Live.Orders import Short
-    c = FakeClient()
+    c = FakeClient(position_rows=[{"symbol": "BTCUSDT", "positionSide": "SHORT", "positionAmt": "0.0123456789"}])
     Short.exit(c, "BTCUSDT")
     p = c.posts()[0]
     assert p["side"] == "BUY"
     assert p["positionSide"] == "SHORT"
-    assert p.get("closePosition") == "true"
+    assert p["quantity"] == 0.01234568
+
+
+def test_short_exit_uses_explicit_quantity():
+    from Live.Orders import Short
+    c = FakeClient()
+    Short.exit(c, "BTCUSDT", quantity=0.0123456789)
+    assert c.posts()[0]["quantity"] == 0.01234568
+
+
+def test_short_exit_without_position_rejects_without_post():
+    from Live.Orders import Short
+    c = FakeClient()
+    with pytest.raises(ValueError, match="no short position"):
+        Short.exit(c, "BTCUSDT")
+    assert c.posts() == []

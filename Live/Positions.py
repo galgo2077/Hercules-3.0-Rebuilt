@@ -27,6 +27,7 @@ class PositionTracker:
 
     def fetch(self, client: BinanceClient) -> None:
         raw = client.get("/fapi/v2/positionRisk")
+        positions: dict[str, Position] = {}
         for p in raw:
             symbol = p["symbol"]
             amt = float(p["positionAmt"])
@@ -39,7 +40,8 @@ class PositionTracker:
                 side, usdt = "LONG", abs(amt) * mark
             else:
                 side, usdt = "SHORT", abs(amt) * mark
-            self._positions[symbol] = Position(symbol, side, usdt, entry, mark, upnl)
+            positions[symbol] = Position(symbol, side, usdt, entry, mark, upnl)
+        self._positions = positions
 
     def get(self, asset: str) -> Position:
         return self._positions.get(asset, Position(asset, "FLAT", 0.0, 0.0, 0.0, 0.0))

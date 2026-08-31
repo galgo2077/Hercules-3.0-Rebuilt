@@ -15,6 +15,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from Live.Auth import AuthUser, require_auth
+from Live.ManualClose import ManualCloseRequest, PositionNotOpenError, close_position
 from SharedParams.Config import HerculesConfig
 
 _ROOT = Path(__file__).resolve().parents[1]
@@ -77,7 +78,7 @@ _User = Annotated[AuthUser, Depends(require_auth)]
 @app.get("/api/status")
 async def status_endpoint(user: _User) -> dict[str, Any]:
     kill = _KILL_SWITCH.exists() and json.loads(_KILL_SWITCH.read_text()).get("active", False)
-    return {"ok": True, "kill_switch": kill, "user": user.id}
+    return {"ok": True, "kill_switch": kill, "user": user.id, "is_admin": user.role in {"admin", "service_role"}}
 
 
 @app.get("/api/config")
@@ -173,6 +174,25 @@ async def get_positions(user: _User) -> list[dict]:
 
     client = get_service_client()
     return [position for account_id in _owned_account_ids(user.id) for position in _records(client.table("live_positions").select("*").eq("account_id", account_id).execute())]
+
+
+@app.post("/api/positions/close")
+async def close_position_endpoint(request: ManualCloseRequest, user: _User) -> dict[str, str | int]:
+    """Market-close the admin-selected LONG or SHORT position after exchange recheck."""
+    if user.role not in {"admin", "service_role"}:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="admin only")
+
+    from SharedParams.Supabase import get_service_client
+
+    response = get_service_client().table("exchange_accounts").select("id,environment").eq("id", request.account_id).eq("user_id", user.id).execute()
+    accounts = _records(response.data)
+    if not accounts:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="account not found")
+    try:
+        result = close_position(request, str(accounts[0].get("environment", "testnet")))
+    except PositionNotOpenError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    return {"status": "closed", **result}
 
 
 # ── Equity ────────────────────────────────────────────────────────────────────

@@ -12,7 +12,7 @@ def enter(client: BinanceClient, symbol: str, usdt_amount: float, leverage: int 
     client.set_leverage(symbol, leverage)
     price_data = client.get("/fapi/v1/ticker/price", symbol=symbol)
     price = float(price_data["price"])
-    qty = round(usdt_amount * leverage / price, 3)
+    qty = client.quantity(symbol, usdt_amount, price) if hasattr(client, "quantity") else round(usdt_amount / price, 3)
     return client.post(
         "/fapi/v1/order",
         symbol=symbol,
@@ -29,11 +29,14 @@ def exit(client: BinanceClient, symbol: str, quantity: float | None = None) -> d
         positions = client.get("/fapi/v2/positionRisk")
         pos = next((p for p in positions if p["symbol"] == symbol and p["positionSide"] == "LONG"), None)
         quantity = abs(float(pos["positionAmt"])) if pos else 0.0
+    quantity = client.normalize_quantity(symbol, quantity) if hasattr(client, "normalize_quantity") else round(quantity, 8)
+    if float(quantity) <= 0:
+        raise ValueError(f"{symbol} has no long position to close")
     return client.post(
         "/fapi/v1/order",
         symbol=symbol,
         side="SELL",
         type="MARKET",
         positionSide="LONG",
-        quantity=round(quantity, 3),
+        quantity=quantity,
     )

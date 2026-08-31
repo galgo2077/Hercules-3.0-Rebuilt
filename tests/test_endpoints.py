@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import asyncio
+from datetime import datetime, timezone
 
 import pytest
 from fastapi.testclient import TestClient
@@ -71,9 +73,99 @@ def client_admin(monkeypatch, tmp_path):
 
 def test_dashboard_returns_snapshot(client_user, monkeypatch):
     monkeypatch.setattr("SharedParams.Supabase.get_service_client", lambda: FakeSupabase([]))
+    monkeypatch.setattr("Live.Readiness.build", lambda assets: [])
     r = client_user.get("/api/dashboard")
     assert r.status_code == 200
     assert "stats" in r.json()
+
+
+def test_readiness_marks_signal_without_entry_as_yellow(monkeypatch):
+    import polars as pl
+    import Live.Readiness as readiness
+
+    readiness._CACHE = (0, [])
+    decisions = pl.DataFrame({
+        "asset": ["BTCUSDT"], "final_signal": [1], "action": ["Hold"],
+        "entry_allowed": [False], "reason": ["slope_not_confirmed"],
+        "timestamp": [datetime(2026, 8, 25, tzinfo=timezone.utc)],
+    })
+    monkeypatch.setattr("Dataframe.OhlcvCache.fetch_warmup", lambda *args: pl.DataFrame())
+    monkeypatch.setattr("Dataframe.Frame.build", lambda *args: pl.DataFrame())
+    monkeypatch.setattr("Strategy.Strategy.evaluate", lambda *args: decisions)
+    result = readiness.build(["BTCUSDT"])
+    assert result[0]["state"] == "yellow"
+
+
+def test_demo_dispatches_closed_candles_for_every_configured_asset(monkeypatch):
+    from Live.Demo import DemoEngine
+
+    engine = DemoEngine()
+    dispatched: list[str] = []
+
+    async def record(_client, asset):
+        dispatched.append(asset)
+
+    monkeypatch.setattr(engine._buffer, "ingest_ws", lambda *_args: True)
+    monkeypatch.setattr(engine._buffer, "ready", lambda *_args: True)
+    monkeypatch.setattr(engine, "_process_asset", record)
+
+    async def dispatch_all():
+        for asset in engine._assets:
+            msg = {"stream": f"{asset.lower()}@kline_1h", "data": {"k": {"t": 123, "x": True}}}
+            engine._dispatch_candle(object(), msg)
+            engine._dispatch_candle(object(), msg)
+        await asyncio.sleep(0)
+
+    asyncio.run(dispatch_all())
+    assert dispatched == engine._assets
+
+
+def test_binance_quantity_uses_each_asset_exchange_filters(monkeypatch):
+    from Live import _client
+
+    _client._symbol_filters.clear()
+    filters = {
+        "BTCUSDT": ("0.001", "0.001", "5"),
+        "ETHUSDT": ("0.001", "0.001", "5"),
+        "SOLUSDT": ("0.1", "0.1", "5"),
+        "XRPUSDT": ("1", "1", "5"),
+    }
+
+    class FakeHttp:
+        def get(self, _url, params=None):
+            symbol = params["symbol"]
+            step, minimum, notional = filters[symbol]
+            return type("Response", (), {"is_error": False, "json": lambda self: {"symbols": [{
+                "symbol": symbol,
+                "filters": [
+                    {"filterType": "LOT_SIZE", "stepSize": step, "minQty": minimum},
+                    {"filterType": "MIN_NOTIONAL", "minNotional": notional},
+                ],
+            }]}})()
+
+    client = _client.BinanceClient.__new__(_client.BinanceClient)
+    client._base = "https://test.invalid"
+    client._http = FakeHttp()
+    for symbol in filters:
+        assert float(client.quantity(symbol, 100.0, 10.0)) >= float(filters[symbol][1])
+
+
+def test_position_tracker_clears_position_missing_from_exchange():
+    from Live.Positions import PositionTracker
+
+    class Client:
+        def __init__(self):
+            self.raw = [{"symbol": "BTCUSDT", "positionAmt": "0.01", "markPrice": "100", "entryPrice": "90", "unRealizedProfit": "0"}]
+        def get(self, _path):
+            return self.raw
+
+    client = Client()
+    tracker = PositionTracker()
+    tracker.fetch(client)
+    assert tracker.get("BTCUSDT").side == "LONG"
+    client.raw = []
+    tracker.fetch(client)
+    assert tracker.get("BTCUSDT").is_flat
 
 
 def test_status_ok(client_user):
@@ -81,6 +173,7 @@ def test_status_ok(client_user):
     assert r.status_code == 200
     body = r.json()
     assert body["ok"] is True
+    assert body["is_admin"] is False
 
 
 def test_status_kill_switch_inactive(client_user):
@@ -160,6 +253,35 @@ def test_positions_returns_list(client_user, monkeypatch):
     r = client_user.get("/api/positions")
     assert r.status_code == 200
     assert isinstance(r.json(), list)
+
+
+def test_manual_close_user_forbidden(client_user):
+    r = client_user.post("/api/positions/close", json={"account_id": "a1", "symbol": "BTCUSDT", "position_side": "LONG"})
+    assert r.status_code == 403
+
+
+def test_manual_close_admin_rechecks_and_closes(client_admin, monkeypatch):
+    client, _ = client_admin
+    calls = []
+
+    class FakeBinanceClient:
+        def __init__(self, *args, **kwargs): pass
+        def __enter__(self): return self
+        def __exit__(self, *args): pass
+        def get(self, path):
+            assert path == "/fapi/v2/positionRisk"
+            return [{"symbol": "BTCUSDT", "positionSide": "LONG", "positionAmt": "0.0010"}]
+        def post(self, path, **params):
+            calls.append((path, params))
+            return {"orderId": 123}
+
+    monkeypatch.setattr("SharedParams.Supabase.get_service_client", lambda: FakeSupabase([{"id": "a1", "user_id": "admin1", "environment": "testnet"}]))
+    monkeypatch.setattr("Live.Crypto.load_credential", lambda account_id: ("key", "secret"))
+    monkeypatch.setattr("Live._client.BinanceClient", FakeBinanceClient)
+    r = client.post("/api/positions/close", json={"account_id": "a1", "symbol": "BTCUSDT", "position_side": "LONG"})
+    assert r.status_code == 200
+    assert r.json()["status"] == "closed"
+    assert calls == [("/fapi/v1/order", {"symbol": "BTCUSDT", "side": "SELL", "type": "MARKET", "positionSide": "LONG", "quantity": "0.0010"})]
 
 
 # ── Equity ────────────────────────────────────────────────────────────────────

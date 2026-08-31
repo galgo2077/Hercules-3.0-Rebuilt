@@ -160,5 +160,7 @@ def evaluate(
             }
         )
 
-    decisions = pl.DataFrame(results)
+    decisions = pl.DataFrame(results).with_columns(
+        pl.col("timestamp").cast(frame.schema["timestamp"])
+    )
     return frame.join(decisions, on=["timestamp", "asset"], how="left")

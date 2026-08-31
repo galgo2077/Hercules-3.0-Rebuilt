@@ -15,6 +15,7 @@ from Dataframe.CandleBuffer import CandleBuffer
 from Live._client import BinanceClient
 from Live.Positions import PositionTracker
 from Live.Risk import RiskState, check_entry, eviction_priority, on_entry, on_exit
+from Strategy.Strategy import asset_risk_params, evaluate
 
 log = logging.getLogger(__name__)
 
@@ -65,8 +66,9 @@ class DemoEngine:
         self._tracker = PositionTracker()
         self._buffer = CandleBuffer(capacity=600)
         self._running = False
-        # per-asset lock: prevents concurrent mutations of shared state per asset
-        self._asset_locks: dict[str, asyncio.Lock] = {a: asyncio.Lock() for a in self._assets}
+        self._execution_lock = asyncio.Lock()
+        self._tasks: set[asyncio.Task[None]] = set()
+        self._seen_candles: dict[str, int] = {}
         cash = float(self._pf.get("initial_cash", 100.0))
         self._risk = RiskState(
             initial_equity=cash,
@@ -85,43 +87,54 @@ class DemoEngine:
     def _dispatch_candle(self, client: BinanceClient, msg: dict[str, Any]) -> None:
         """Parse message and schedule per-asset processing as a concurrent task."""
         stream = msg.get("stream", "")
-        asset = stream.split("@")[0].upper() + "USDT" if "@" in stream else ""
+        asset = stream.split("@", 1)[0].upper() if "@" in stream else ""
         if asset not in self._assets:
+            return
+        kline = msg.get("data", msg).get("k", msg.get("k", {}))
+        candle_ts = int(kline.get("t", 0))
+        if kline and (not kline.get("x", False) or (candle_ts and self._seen_candles.get(asset) == candle_ts)):
             return
         if not self._buffer.ingest_ws(asset, msg):
             return  # not closed candle
+        if candle_ts:
+            self._seen_candles[asset] = candle_ts
         if not self._buffer.ready(asset, _MIN_BARS):
             return
-        asyncio.ensure_future(self._process_asset(client, asset))
+        task = asyncio.create_task(self._process_asset(client, asset))
+        self._tasks.add(task)
+        task.add_done_callback(self._log_task_failure)
+        task.add_done_callback(self._tasks.discard)
+
+    def _log_task_failure(self, task: asyncio.Task[None]) -> None:
+        if task.cancelled():
+            return
+        error = task.exception()
+        if error is not None:
+            log.error("[%s] asset processing failed: %s", self._label, error, exc_info=error)
 
     async def _process_asset(self, client: BinanceClient, asset: str) -> None:
         """Build frame + evaluate strategy for one asset, then execute. Runs concurrently."""
         import polars as pl
         from Dataframe.Frame import build
-        from Strategy.Strategy import evaluate
 
-        rows = self._buffer.to_dicts(asset)
-        ohlcv = pl.DataFrame(rows).with_columns(
-            pl.from_epoch(pl.col("timestamp"), time_unit="ms").alias("timestamp")
-        )
-        # build + evaluate are CPU-heavy (call Rust/original repo); run in thread to not block WS
-        frame = await asyncio.to_thread(build, ohlcv)
-        allocs = self._allocations()
-        exposures = self._tracker.as_exposure_dict(allocs)
-        decisions = await asyncio.to_thread(
-            evaluate, frame.filter(pl.col("asset") == asset), asset_exposures=exposures
-        )
-
-        last = decisions.filter(pl.col("asset") == asset).sort("timestamp").tail(1)
-        if last.is_empty():
-            return
-
-        async with self._asset_locks[asset]:
+        async with self._execution_lock:
+            rows = self._buffer.to_dicts(asset)
+            ohlcv = pl.DataFrame(rows).with_columns(
+                pl.from_epoch(pl.col("timestamp"), time_unit="ms").alias("timestamp")
+            )
+            frame = await asyncio.to_thread(build, ohlcv)
+            allocs = self._allocations()
+            exposures = self._tracker.as_exposure_dict(allocs)
+            decisions = await asyncio.to_thread(
+                evaluate, frame.filter(pl.col("asset") == asset), asset_exposures=exposures
+            )
+            last = decisions.filter(pl.col("asset") == asset).sort("timestamp").tail(1)
+            if last.is_empty():
+                return
             self._execute(client, last.row(0, named=True), allocs)
 
     def _execute(self, client: BinanceClient, row: dict, allocs: dict[str, float]) -> None:
         from Live.Orders import Long, Short
-        from Strategy.Strategy import asset_risk_params
 
         asset = row["asset"]
         action = row.get("action", "Hold")
@@ -153,7 +166,9 @@ class DemoEngine:
                     Long.exit(client, victim)
                 else:
                     Short.exit(client, victim)
-                on_exit(self._risk, victim_side)
+                self._tracker.fetch(client)
+                if self._tracker.get(victim).is_flat:
+                    on_exit(self._risk, victim_side)
             if side == "Long":
                 log.info("DEMO ENTRY LONG %s %.2f USDT lev=%d", asset, amount, leverage)
                 Long.enter(client, asset, amount, leverage)
@@ -163,18 +178,26 @@ class DemoEngine:
                 Short.enter(client, asset, amount, leverage,
                             stop_loss_pct=risk["stop_loss_pct"],
                             take_profit_pct=risk["take_profit_pct"])
-            on_entry(self._risk, ex_side)
+            self._tracker.fetch(client)
+            if self._tracker.get(asset).side == ex_side:
+                on_entry(self._risk, ex_side)
+            else:
+                log.error("entry confirmation mismatch %s expected=%s actual=%s", asset, ex_side, self._tracker.get(asset).side)
 
         elif row.get("exit_required"):
             pos = self._tracker.get(asset)
             if pos.side == "LONG":
                 log.info("DEMO EXIT LONG %s", asset)
                 Long.exit(client, asset)
-                on_exit(self._risk, "LONG")
+                self._tracker.fetch(client)
+                if self._tracker.get(asset).is_flat:
+                    on_exit(self._risk, "LONG")
             elif pos.side == "SHORT":
                 log.info("DEMO EXIT SHORT %s", asset)
                 Short.exit(client, asset)
-                on_exit(self._risk, "SHORT")
+                self._tracker.fetch(client)
+                if self._tracker.get(asset).is_flat:
+                    on_exit(self._risk, "SHORT")
 
     async def _listen(self) -> None:
         url = _stream_url(self._assets, self._interval)
@@ -182,13 +205,17 @@ class DemoEngine:
             client.ensure_hedge_mode()  # must run before any order; raises if it fails
             self._tracker.fetch(client)
             async with websockets.connect(url) as ws:
-                async for raw in ws:
-                    if not self._running:
-                        break
-                    try:
-                        self._dispatch_candle(client, json.loads(raw))
-                    except Exception:
-                        log.exception("[%s] candle dispatch error", self._label)
+                try:
+                    async for raw in ws:
+                        if not self._running:
+                            break
+                        try:
+                            self._dispatch_candle(client, json.loads(raw))
+                        except Exception:
+                            log.exception("[%s] candle dispatch error", self._label)
+                finally:
+                    if self._tasks:
+                        await asyncio.gather(*tuple(self._tasks), return_exceptions=True)
 
     def start(self) -> None:
         self._running = True

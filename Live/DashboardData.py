@@ -113,6 +113,8 @@ def build_dashboard(user_id: str, leverage: float, configured_assets: list[str],
     ] or trades[:100]
     win_streak, loss_streak = _streaks(closed)
     gross_profit, gross_loss = sum(winners), abs(sum(losers))
+    from Live.Readiness import build as build_readiness
+
     return {
         "accounts": all_accounts,
         "selected_account_id": account_id,
@@ -121,6 +123,7 @@ def build_dashboard(user_id: str, leverage: float, configured_assets: list[str],
         "positions": exchange_positions or positions,
         "equity": equity,
         "exchange_errors": exchange.get("errors", []),
+        "readiness": build_readiness(assets),
         "stats": {
             "equity_usdt": latest_equity,
             "available_usdt": available or latest_equity - open_size,

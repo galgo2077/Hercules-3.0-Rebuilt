@@ -7,13 +7,18 @@ import sys
 import threading
 import tomllib
 from collections.abc import Callable
+from contextlib import contextmanager
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import polars as pl
 
-_ORIGINAL_REPO = Path("/home/void/Documents/Hercules 3.0")
+_ROOT = Path(__file__).resolve().parents[1]
+_ORIGINAL_REPO = Path(
+    os.environ.get("HERCULES_ORIGINAL_ROOT", "/home/void/Documents/Hercules 3.0")
+).expanduser()
 _STRATEGY_TOML = Path(__file__).parent.parent / "SharedData" / "Strategy.toml"
+_IMPORT_LOCK = threading.RLock()
 
 FRAME_COLUMNS = (
     "timestamp",
@@ -90,16 +95,36 @@ def _build_config() -> dict:
     }
 
 
-def _ensure_original_on_path() -> None:
-    rebuild = str(_ORIGINAL_REPO.parent / "hercules 3.0 rebuilt")
+@contextmanager
+def _original_strategy_bridge() -> object:
+    """Expose the original Strategy package only while its frame pipeline runs."""
     original = str(_ORIGINAL_REPO)
-    if original not in sys.path:
-        sys.path.append(original)
-    if rebuild not in sys.path:
-        sys.path.insert(0, rebuild)
-    elif sys.path[0] != rebuild:
-        sys.path.remove(rebuild)
-        sys.path.insert(0, rebuild)
+    rebuild = str(_ROOT)
+    if not (_ORIGINAL_REPO / "Strategy" / "getData.py").is_file():
+        raise RuntimeError(f"Original Strategy source is unavailable: {_ORIGINAL_REPO}")
+
+    with _IMPORT_LOCK:
+        saved_modules = {
+            name: module
+            for name, module in sys.modules.items()
+            if name == "Strategy" or name.startswith("Strategy.")
+        }
+        for name in list(saved_modules):
+            del sys.modules[name]
+
+        saved_path = list(sys.path)
+        sys.path[:] = [path for path in sys.path if path not in (original, rebuild)]
+        sys.path.insert(0, original)
+        try:
+            from Strategy.getData import build_final_strategy_dataframe  # type: ignore[import]
+
+            yield build_final_strategy_dataframe
+        finally:
+            for name in list(sys.modules):
+                if name == "Strategy" or name.startswith("Strategy."):
+                    del sys.modules[name]
+            sys.modules.update(saved_modules)
+            sys.path[:] = saved_path
 
 
 def _validate(frame: pl.DataFrame) -> None:
@@ -122,35 +147,32 @@ def build(
     Columns produced: timestamp, open, high, low, close, volume, asset,
     direction, short_trend_similarity, final_signal (Int8), slope.
     """
-    _ensure_original_on_path()
-    # Import in main thread before spawning workers — keeps sys.path safe.
-    from Strategy.getData import build_final_strategy_dataframe  # type: ignore[import]
+    with _original_strategy_bridge() as build_final_strategy_dataframe:
+        config = _build_config()
+        assets = ohlcv["asset"].unique().to_list()
 
-    config = _build_config()
-    assets = ohlcv["asset"].unique().to_list()
+        if len(assets) <= 1:
+            frame = build_final_strategy_dataframe(ohlcv, config=config, progress=progress)
+            _validate(frame)
+            return frame.select(*FRAME_COLUMNS)
 
-    if len(assets) <= 1:
-        frame = build_final_strategy_dataframe(ohlcv, config=config, progress=progress)
+        # Multi-asset: each asset slice is independent — split, compute in parallel, concat.
+        n = min(len(assets), n_workers or os.cpu_count() or 4)
+        lock = threading.Lock()
+
+        def _build_one(asset: str) -> pl.DataFrame:
+            result = build_final_strategy_dataframe(
+                ohlcv.filter(pl.col("asset") == asset),
+                config=config,
+            )
+            if progress is not None:
+                with lock:
+                    progress(asset)
+            return result
+
+        with ThreadPoolExecutor(max_workers=n, thread_name_prefix="frame") as pool:
+            parts = list(pool.map(_build_one, assets))
+
+        frame = pl.concat(parts).sort("timestamp", "asset")
         _validate(frame)
         return frame.select(*FRAME_COLUMNS)
-
-    # Multi-asset: each asset slice is independent — split, compute in parallel, concat.
-    n = min(len(assets), n_workers or os.cpu_count() or 4)
-    lock = threading.Lock()
-
-    def _build_one(asset: str) -> pl.DataFrame:
-        result = build_final_strategy_dataframe(
-            ohlcv.filter(pl.col("asset") == asset),
-            config=config,
-        )
-        if progress is not None:
-            with lock:
-                progress(asset)
-        return result
-
-    with ThreadPoolExecutor(max_workers=n, thread_name_prefix="frame") as pool:
-        parts = list(pool.map(_build_one, assets))
-
-    frame = pl.concat(parts).sort("timestamp", "asset")
-    _validate(frame)
-    return frame.select(*FRAME_COLUMNS)
