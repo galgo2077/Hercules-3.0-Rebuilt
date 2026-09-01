@@ -5,7 +5,7 @@
   "type": "module",
   "dependencies": {
     "@iarna/toml": "^2.2.5",
-    "@whiskeysockets/baileys": "7.0.0-rc14",
+    "@whiskeysockets/baileys": "6.7.23",
     "pino": "^9.9.4"
   }
 }
