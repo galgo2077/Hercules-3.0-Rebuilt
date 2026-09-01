@@ -1,0 +1,3 @@
+- major-tom-whatsapp pairing request before Baileys socket QR readiness caused status 428 Connection Closed
+- root cause: requestPairingCode ran immediately after socket construction
+- fix: request once on first QR connection update; roundtable timeout fallback, evidence: Rocky journal
