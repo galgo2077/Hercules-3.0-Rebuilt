@@ -19,9 +19,8 @@ def test_audit_healthy(_service, _health_check, _git):
 
 @patch("major_tom.watchdog._service_state", return_value={"active": True, "output": "active"})
 @patch("major_tom.watchdog._health", return_value={"ok": True})
-@patch("major_tom.watchdog.WhatsAppConfig.from_env")
-def test_watchdog_requires_fresh_audit_and_db(config, _health_check, _service):
-    config.return_value.enabled = True
+@patch("major_tom.watchdog.bridge_health", return_value={"healthy": True})
+def test_watchdog_requires_fresh_audit_and_db(_bridge, _health_check, _service):
     with tempfile.NamedTemporaryFile() as marker:
         result = watchdog({"audit_file": marker.name, "db_health_url": "https://db/health"})
     assert result["ok"]

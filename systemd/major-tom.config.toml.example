@@ -1,0 +1,5 @@
+[whatsapp]
+# Keep the real number and session outside Git. Digits, +, spaces, and a WhatsApp JID are accepted.
+admin_phone = ""
+session_dir = "/etc/hercules/major-tom/whatsapp-session"
+state_file = "/var/lib/major-tom/whatsapp-state.json"

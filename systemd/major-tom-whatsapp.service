@@ -1,0 +1,20 @@
+[Unit]
+Description=Major Tom WhatsApp Web bridge
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=galgo
+WorkingDirectory=/home/galgo/Documentos/Hercules-3.0-Rebuilt/major_tom/whatsapp_bridge
+Environment=MAJOR_TOM_CONFIG=/etc/hercules/major-tom/config.toml
+Environment=MAJOR_TOM_WHATSAPP_STATE_FILE=/var/lib/major-tom/whatsapp-state.json
+Environment=PYTHONPATH=/home/galgo/Documentos/Hercules-3.0-Rebuilt
+StateDirectory=major-tom
+StateDirectoryMode=0700
+ExecStart=/usr/bin/node index.mjs
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

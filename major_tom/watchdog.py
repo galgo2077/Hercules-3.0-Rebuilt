@@ -3,7 +3,7 @@ import os
 import time
 
 from .audit import _health, _service_state
-from .whatsapp import WhatsAppConfig
+from .whatsapp_bridge import bridge_health
 
 
 def watchdog(config=None):
@@ -20,8 +20,8 @@ def watchdog(config=None):
               "hercules": _service_state(config.get("hercules_service", os.getenv("HERCULES_SERVICE", "hercules-dashboard.service"))),
               "web": _health(config.get("health_url", os.getenv("HERCULES_HEALTH_URL", "http://127.0.0.1:8000/health"))),
               "db_configured": bool(db_url or os.getenv("DATABASE_URL") or os.getenv("SUPABASE_URL")),
-              "whatsapp_configured": WhatsAppConfig.from_env().enabled,
+              "whatsapp": bridge_health(config.get("whatsapp_state_file", os.getenv("MAJOR_TOM_WHATSAPP_STATE_FILE", "/var/lib/major-tom/whatsapp-state.json")), int(config.get("whatsapp_max_state_age", os.getenv("MAJOR_TOM_WHATSAPP_MAX_STATE_AGE", "300")))),
               "audit_age_seconds": audit_age}
     checks["audit_fresh"] = audit_age is not None and audit_age <= max_age
-    checks["ok"] = all((checks["major_tom"]["active"], checks["hercules"]["active"], checks["web"]["ok"], checks["db_configured"], checks["whatsapp_configured"], checks["audit_fresh"]))
+    checks["ok"] = all((checks["major_tom"]["active"], checks["hercules"]["active"], checks["web"]["ok"], checks["db_configured"], checks["whatsapp"]["healthy"], checks["audit_fresh"]))
     return checks

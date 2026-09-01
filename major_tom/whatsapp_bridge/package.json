@@ -1,0 +1,11 @@
+{
+  "name": "major-tom-whatsapp-bridge",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "dependencies": {
+    "@iarna/toml": "^2.2.5",
+    "@whiskeysockets/baileys": "7.0.0-rc14",
+    "pino": "^9.9.4"
+  }
+}
