@@ -57,21 +57,9 @@ async function start() {
   const { state, saveCreds } = await useMultiFileAuthState(config.sessionDir);
   const sessionReadable = await stat(config.sessionDir).then(() => true, () => false);
   await writeState(config, { connected: false, paired: state.creds.registered, session_readable: sessionReadable, reconnect_healthy: true, reason: state.creds.registered ? "connecting" : "PAIRING_REQUIRED" });
-  const sock = makeWASocket({ auth: state, browser: Browsers.ubuntu("Major Tom"), logger, markOnlineOnConnect: false, syncFullHistory: false });
-  let pairingRequested = false;
+  const sock = makeWASocket({ auth: state, browser: Browsers.ubuntu("Major Tom"), logger, markOnlineOnConnect: false, printQRInTerminal: false, syncFullHistory: false });
   sock.ev.on("creds.update", saveCreds);
-  sock.ev.on("connection.update", async ({ connection, lastDisconnect, qr }) => {
-    if (qr && !state.creds.registered && !pairingRequested) {
-      pairingRequested = true;
-      try {
-        const pairingCode = await sock.requestPairingCode(config.adminPhone);
-        console.log(`MAJOR TOM WHATSAPP SETUP\nPairing code: ${pairingCode}`);
-        await writeState(config, { pairing_code: pairingCode, paired: false, reason: "PAIRING_REQUIRED" });
-      } catch (error) {
-        pairingRequested = false;
-        await writeState(config, { reconnect_healthy: false, reason: `pairing_failed:${error.message}` });
-      }
-    }
+  sock.ev.on("connection.update", async ({ connection, lastDisconnect }) => {
     if (connection === "open") await writeState(config, { connected: true, paired: true, pairing_code: null, reconnect_healthy: true, reason: null });
     if (connection !== "close") return;
     const statusCode = lastDisconnect?.error?.output?.statusCode;
@@ -82,6 +70,11 @@ async function start() {
       setTimeout(() => { reconnecting = false; start().catch((error) => console.error(error)); }, 5000);
     }
   });
+  if (!state.creds.registered) {
+    const pairingCode = await sock.requestPairingCode(config.adminPhone);
+    console.log(`MAJOR TOM WHATSAPP SETUP\nPairing code: ${pairingCode}`);
+    await writeState(config, { pairing_code: pairingCode, paired: false, reason: "PAIRING_REQUIRED" });
+  }
   sock.ev.on("messages.upsert", async ({ type, messages }) => {
     if (type !== "notify") return;
     for (const message of messages) {
