@@ -64,17 +64,14 @@ def _paths(data: dict[str, Any], search: dict[str, Any]) -> list[tuple[str, str]
     window = duration * fraction
     generator = random.Random(int(search["seed"]))  # noqa: S311 - reproducible historical sampling
     offsets = [generator.random() * (duration - window) for _ in range(int(search["paths"]))]
-    return [
-        ((start + offset).isoformat().replace("+00:00", "Z"), (start + offset + window).isoformat().replace("+00:00", "Z"))
-        for offset in offsets
-    ]
+    return [((start + offset).isoformat().replace("+00:00", "Z"), (start + offset + window).isoformat().replace("+00:00", "Z")) for offset in offsets]
 
 
 def _candidate(base: dict[str, Any], ranges: dict[str, Any], generator: random.Random) -> dict[str, Any]:
     candidate = deepcopy(base)
     for settings in candidate["assets"].values():
-        settings["signal_minimum_overall_confidence"] = round(generator.uniform(ranges["minimum_confidence"], ranges["maximum_confidence"]), 3)
-        settings["signal_minimum_signal_score"] = round(generator.uniform(ranges["minimum_score"], ranges["maximum_score"]), 3)
+        for name in ("rdma_fast_half_life", "rdma_medium_half_life", "rdma_slow_half_life", "min_direction_bars"):
+            settings[name] = generator.randint(int(ranges[f"{name}_min"]), int(ranges[f"{name}_max"]))
     return candidate
 
 
@@ -145,8 +142,8 @@ def _apply(strategy: dict[str, Any]) -> None:
         if match is None:
             raise RuntimeError(f"missing Strategy.toml section for {asset}")
         body = match.group(1)
-        for key in ("signal_minimum_overall_confidence", "signal_minimum_signal_score"):
-            body = re.sub(rf"({key}\s*=\s*)[0-9.]+", rf"\g<1>{values[key]:.3f}", body)
+        for key in ("rdma_fast_half_life", "rdma_medium_half_life", "rdma_slow_half_life", "min_direction_bars"):
+            body = re.sub(rf"({key}\s*=\s*)[0-9]+", rf"\g<1>{values[key]}", body)
         text = text[: match.start()] + body + text[match.end() :]
     _STRATEGY_PATH.write_text(text, encoding="utf-8")
 

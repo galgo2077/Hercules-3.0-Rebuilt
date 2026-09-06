@@ -1,23 +1,17 @@
-"""Backtest simulation — calls original's load_backtest_frames with TOML-derived config."""
+"""Self-contained deterministic portfolio backtest."""
 
 from __future__ import annotations
 
-import json
-import os
-import sys
-import tempfile
-import threading
 import tomllib
 from collections.abc import Callable
-from concurrent.futures import ThreadPoolExecutor
-from copy import deepcopy
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
+from typing import Any, cast
 
 import polars as pl
 
 _ROOT = Path(__file__).resolve().parents[1]
-_ORIGINAL = Path(os.environ.get("HERCULES_ORIGINAL_ROOT", "/home/void/Documents/Hercules 3.0")).expanduser()
 ProgressCallback = Callable[[str, float], None]
 MonteCarloProgressCallback = Callable[[int, int], None]
 
@@ -30,91 +24,253 @@ class BacktestResult:
     equity: pl.DataFrame
 
 
-def _toml(name: str) -> dict:
-    with (_ROOT / "SharedData" / f"{name}.toml").open("rb") as f:
-        return tomllib.load(f)
+def _toml(name: str) -> dict[str, Any]:
+    with (_ROOT / "SharedData" / f"{name}.toml").open("rb") as handle:
+        return tomllib.load(handle)
 
 
-def _build_config_json5(
-    start: str | None,
-    end: str | None,
-    assets: list[str] | None,
-    initial_cash: float | None,
-    strategy_override: dict | None = None,
-) -> str:
-    """Build a JSON5 config string matching Backtest/params.json5 format."""
-    bt = _toml("Backtest")
-    portfolio = _toml("Portfolio")
+def _timestamp(value: str) -> datetime:
+    return datetime.fromisoformat(value.replace("Z", "+00:00"))
 
-    _start = start or bt["data"]["start_date"]
-    _end = end or bt["data"]["end_date"]
-    _assets = assets or list(bt["data"]["assets"])
-    _cash = float(initial_cash if initial_cash is not None else bt["capital"]["initial_cash"])
 
-    cfg = {
-        "schema_version": int(bt.get("schema_version", 1)),
-        "mode": str(bt.get("mode", "real")),
-        "data": {
-            "start_date": _start,
-            "end_date": _end,
-            "timeframe": str(bt["data"].get("timeframe", "1h")),
-            "assets": _assets,
-            "portfolio_weights": {
-                asset: float(portfolio["allocation"][asset])
-                for asset in _assets
-            },
-        },
-        "capital": {
-            "initial_cash": _cash,
-            "minimum_free_equity": float(bt["capital"].get("minimum_free_equity", 10.0)),
-            "max_gross_exposure": float(bt["capital"].get("max_gross_exposure", 1.0)),
-            "allow_short": bool(bt["capital"].get("allow_short", True)),
-        },
-        "execution": {
-            "diezmar": None,
-            "risk_per_trade_pct": None,
-            "compound_equity": False,
-            "max_trade_size_percentage": None,
-            "higher_timeframe_window": None,
-            "pyramiding_max": None,
-            **dict(bt["execution"]),
-            "leverage": float(portfolio["leverage"]),
-            "trade_size_percentage": float(portfolio["trade_size_pct"]),
-            "take_profit_pct": float(portfolio["take_profit_pct"]),
-            "checkpoint_trail_pct": float(portfolio["checkpoint_trail_pct"]),
-            "short_trailing_stop_pct": float(portfolio["short_trailing_stop_pct"]),
-            "short_exit_on_bullish_trend": bool(portfolio["short_exit_on_bullish_trend"]),
-            "max_concurrent_shorts": int(portfolio["max_concurrent_shorts"]),
-        },
-        "monte_carlo": dict(bt.get("monte_carlo", {})),
+def _cached_ohlcv(assets: list[str], start: str, end: str, interval: str) -> pl.DataFrame:
+    from Dataframe.Binance import INTERVAL_MS, fetch_historical
+
+    end_time = _timestamp(end)
+    for source in sorted((_ROOT / ".cache" / "ohlcv").glob("*.parquet"), key=lambda path: path.stat().st_size, reverse=True):
+        frame = pl.read_parquet(source)
+        time_column = "timestamp" if "timestamp" in frame.columns else "open_time"
+        if not {"asset", time_column} <= set(frame.columns) or not set(assets) <= set(frame["asset"].unique().to_list()):
+            continue
+        timestamps = frame.filter(pl.col("asset") == assets[0]).sort(time_column)[time_column].head(2).to_list()
+        if len(timestamps) == 2 and int((timestamps[1] - timestamps[0]).total_seconds() * 1000) != INTERVAL_MS[interval]:
+            continue
+        latest = [frame.filter(pl.col("asset") == asset)[time_column].max() for asset in assets]
+        if any(not isinstance(value, datetime) or value < end_time for value in latest):
+            continue
+        selected = frame.filter(pl.col("asset").is_in(assets), pl.col(time_column).is_between(_timestamp(start), end_time, closed="both"))
+        return selected.rename({time_column: "timestamp"}) if time_column != "timestamp" else selected
+    return fetch_historical(assets, start, end, interval=interval)
+
+
+def _load_ohlcv(
+    assets: list[str],
+    start: str,
+    end: str,
+    interval: str,
+    source: object | None,
+    progress: ProgressCallback | None,
+) -> pl.DataFrame:
+    if source is None:
+        frame = _cached_ohlcv(assets, start, end, interval)
+    else:
+        getter = getattr(source, "get_dataframe", None)
+        if not callable(getter):
+            raise TypeError("maria_api must provide get_dataframe()")
+        frame = cast(pl.DataFrame, getter(assets, start, end, interval=interval, progress=progress))
+        if "timestamp" not in frame.columns and "open_time" in frame.columns:
+            frame = frame.rename({"open_time": "timestamp"})
+    if frame.is_empty():
+        raise ValueError("no OHLCV data for requested backtest range")
+    return frame.sort("timestamp", "asset")
+
+
+def _close_trade(position: dict[str, Any], timestamp: datetime, price: float, reason: str, fee_rate: float, slippage: float) -> tuple[dict[str, Any], float]:
+    side = position["side"]
+    exit_price = price * (1.0 - slippage if side == "long" else 1.0 + slippage)
+    direction = 1.0 if side == "long" else -1.0
+    gross = direction * (exit_price - position["open"]) / position["open"] * position["size_usdt"]
+    fees = fee_rate * position["size_usdt"] * 2.0
+    pnl = gross - fees
+    trade = {
+        "asset": position["asset"],
+        "type": side,
+        "side": side,
+        "timestamp": position["timestamp"],
+        "entry_time": position["timestamp"],
+        "open": position["open"],
+        "entry_price": position["open"],
+        "exit_timestamp": timestamp,
+        "exit_price": exit_price,
+        "quantity": position["size_usdt"] / position["open"],
+        "size_usdt": position["size_usdt"],
+        "pnl": pnl,
+        "fees": fees,
+        "outcome": "win" if pnl > 0 else "lose",
+        "exit_reason": reason,
+    }
+    return trade, pnl
+
+
+def _metrics(asset: str, trades: list[dict[str, Any]], initial: float, end: float, max_drawdown: float, start: datetime, finish: datetime) -> dict[str, Any]:
+    selected = trades if asset == "TOTAL" else [trade for trade in trades if trade["asset"] == asset]
+    wins = sum(trade["outcome"] == "win" for trade in selected)
+    longs = [trade for trade in selected if trade["side"] == "long"]
+    shorts = [trade for trade in selected if trade["side"] == "short"]
+    return {
+        "asset": asset,
+        "start": start,
+        "end": finish,
+        "number_of_trades": len(selected),
+        "win_rate": wins / len(selected) if selected else 0.0,
+        "win_longs_pct": sum(trade["outcome"] == "win" for trade in longs) / len(longs) if longs else 0.0,
+        "win_shorts_pct": sum(trade["outcome"] == "win" for trade in shorts) / len(shorts) if shorts else 0.0,
+        "end_money": end,
+        "roi_usd": end - initial,
+        "roi": end / initial - 1.0,
+        "max_drawdown": max_drawdown,
+        "max_drawdown_usd": max_drawdown * initial,
     }
 
-    # Inject per-asset condition/signal overrides from Strategy.toml so that
-    # SharedData/Strategy.toml is the single source of truth for both live and backtest.
-    _COND = (
-        "minimum_volatility_regime", "long_entry_minimum_candles",
-        "short_trend_window", "short_entry_minimum_bearish_bars",
-        "require_slope_confirmation",
-    )
-    _SIG = {
-        "signal_minimum_overall_confidence": "thresholds.minimum_overall_confidence",
-        "signal_minimum_signal_score": "thresholds.minimum_signal_score",
-    }
-    st = (strategy_override or _toml("Strategy")).get("assets", {})
-    strategy_by_asset, indicator_by_asset = {}, {}
-    for asset, params in st.items():
-        conds = {k: params[k] for k in _COND if k in params}
-        if conds:
-            strategy_by_asset[asset] = {"conditions": conds}
-        sigs = {dot: params[tk] for tk, dot in _SIG.items() if tk in params}
-        if sigs:
-            indicator_by_asset[asset] = {"signal": sigs}
-    if strategy_by_asset:
-        cfg["Strategy_by_asset"] = strategy_by_asset
-    if indicator_by_asset:
-        cfg["Indicator_by_asset"] = indicator_by_asset
-    # json.dumps produces valid JSON5 (JSON is valid JSON5)
-    return json.dumps(cfg, indent=2)
+
+def _simulate(strategy: pl.DataFrame, initial_cash: float, portfolio: dict[str, Any], backtest: dict[str, Any], strategy_config: dict[str, Any]) -> BacktestResult:
+    from Live.Risk import size_trade
+    from Strategy.Strategy import decide
+
+    rows = strategy.sort("timestamp", "asset").iter_rows(named=True)
+    fee_rate = float(backtest["execution"]["fee_rate"])
+    slippage = float(backtest["execution"]["slippage_rate"])
+    positions: dict[str, dict[str, Any]] = {}
+    trades: list[dict[str, Any]] = []
+    last_prices: dict[str, float] = {}
+    equity_rows: list[dict[str, Any]] = []
+    total_equity_rows: list[dict[str, Any]] = []
+    strategy_rows: list[dict[str, Any]] = []
+    assets = sorted(strategy["asset"].unique().to_list())
+    initial_by_asset = {asset: initial_cash * float(portfolio.get("allocation", {}).get(asset, 0.0)) for asset in assets}
+    realized_by_asset = {asset: 0.0 for asset in assets}
+    cash = initial_cash
+    blocked = False
+    first_timestamp: datetime | None = None
+    last_timestamp: datetime | None = None
+
+    for row in rows:
+        asset = str(row["asset"])
+        timestamp = row["timestamp"]
+        first_timestamp = first_timestamp or timestamp
+        last_timestamp = timestamp
+        last_prices[asset] = float(row["close"])
+        position = positions.get(asset)
+        protective_exit = False
+        if position is not None:
+            stop = position.get("stop_loss")
+            take = position.get("take_profit")
+            trigger: tuple[float, str] | None = None
+            if position["side"] == "long":
+                if stop is not None and float(row["low"]) <= stop:
+                    trigger = (stop, "stop_loss")
+                elif take is not None and float(row["high"]) >= take:
+                    trigger = (take, "take_profit")
+            else:
+                if stop is not None and float(row["high"]) >= stop:
+                    trigger = (stop, "stop_loss")
+                elif take is not None and float(row["low"]) <= take:
+                    trigger = (take, "take_profit")
+            if trigger is not None:
+                trade, pnl = _close_trade(position, timestamp, trigger[0], trigger[1], fee_rate, slippage)
+                trades.append(trade)
+                cash += pnl
+                realized_by_asset[asset] += pnl
+                positions.pop(asset)
+                position = None
+                protective_exit = True
+
+        if "action" not in row:
+            if protective_exit:
+                decision = {
+                    "action": "Exit",
+                    "side": "None",
+                    "target_exposure": 0.0,
+                    "exposure_delta": 0.0,
+                    "entry_allowed": False,
+                    "exit_required": True,
+                    "reason": trade["exit_reason"],
+                }
+            else:
+                current_exposure = 0.0 if position is None else (1.0 if position["side"] == "long" else -1.0)
+                decision = decide(row, current_exposure, strategy_config=strategy_config, portfolio_config=portfolio)
+            row = {**row, **decision}
+        strategy_rows.append(row)
+
+        if not blocked and not protective_exit and row.get("action") == "Entry":
+            target = "long" if row.get("side") == "Long" else "short"
+            if position is not None and position["side"] != target:
+                trade, pnl = _close_trade(position, timestamp, float(row["close"]), "reversal", fee_rate, slippage)
+                trades.append(trade)
+                cash += pnl
+                realized_by_asset[asset] += pnl
+                positions.pop(asset)
+                position = None
+            if position is None:
+                asset_params = {**portfolio, **strategy_config.get("assets", {}).get(asset, {})}
+                size = size_trade(cash, asset, portfolio=portfolio, risk=asset_params)
+                raw_price = float(row["close"])
+                entry_price = raw_price * (1.0 + slippage if target == "long" else 1.0 - slippage)
+                stop_pct = asset_params.get("stop_loss_pct")
+                take_pct = asset_params.get("take_profit_pct")
+                if stop_pct is None and take_pct is None:
+                    raise ValueError(f"no protective exit configured for {asset}")
+                positions[asset] = {
+                    "asset": asset,
+                    "side": target,
+                    "timestamp": timestamp,
+                    "open": entry_price,
+                    "size_usdt": size,
+                    "stop_loss": entry_price * (1.0 - float(stop_pct) if target == "long" else 1.0 + float(stop_pct)) if stop_pct is not None else None,
+                    "take_profit": entry_price * (1.0 + float(take_pct) if target == "long" else 1.0 - float(take_pct)) if take_pct is not None else None,
+                }
+
+        unrealized_total = 0.0
+        for open_position in positions.values():
+            mark = last_prices.get(open_position["asset"], open_position["open"])
+            direction = 1.0 if open_position["side"] == "long" else -1.0
+            unrealized_total += direction * (mark - open_position["open"]) / open_position["open"] * open_position["size_usdt"]
+        if not blocked and cash + unrealized_total <= initial_cash * 0.80:
+            for open_position in list(positions.values()):
+                trade, pnl = _close_trade(open_position, timestamp, float(last_prices.get(open_position["asset"]) or open_position["open"]), "risk_halt", fee_rate, slippage)
+                trades.append(trade)
+                cash += pnl
+                realized_by_asset[open_position["asset"]] += pnl
+            positions.clear()
+            position = None
+            blocked = True
+            unrealized_total = 0.0
+
+        open_position = positions.get(asset)
+        unrealized = 0.0
+        if open_position is not None:
+            direction = 1.0 if open_position["side"] == "long" else -1.0
+            unrealized = direction * (float(row["close"]) - open_position["open"]) / open_position["open"] * open_position["size_usdt"]
+        equity_rows.append({"timestamp": timestamp, "asset": asset, "equity": initial_by_asset[asset] + realized_by_asset[asset] + unrealized})
+        total_equity_rows.append({"timestamp": timestamp, "asset": "TOTAL", "equity": cash + unrealized_total})
+
+    if first_timestamp is None or last_timestamp is None:
+        raise ValueError("strategy produced no rows")
+    for position in list(positions.values()):
+        trade, pnl = _close_trade(position, last_timestamp, last_prices[position["asset"]], "end_of_test", fee_rate, slippage)
+        trades.append(trade)
+        cash += pnl
+        realized_by_asset[position["asset"]] += pnl
+
+    trade_frame = pl.DataFrame(trades) if trades else pl.DataFrame(schema={"asset": pl.String, "side": pl.String, "outcome": pl.String})
+    equity_rows.extend({"timestamp": last_timestamp, "asset": asset, "equity": initial_by_asset[asset] + realized_by_asset[asset]} for asset in assets)
+    asset_equity = pl.DataFrame(equity_rows).group_by("timestamp", "asset", maintain_order=True).agg(pl.col("equity").last()).sort("timestamp", "asset")
+    total_equity_rows.append({"timestamp": last_timestamp, "asset": "TOTAL", "equity": cash})
+    total_equity = pl.DataFrame(total_equity_rows).group_by("timestamp", maintain_order=True).agg(pl.col("asset").last(), pl.col("equity").last())
+    equity = pl.concat([asset_equity, total_equity]).sort("timestamp", "asset")
+
+    def drawdown(asset: str) -> float:
+        values = equity.filter(pl.col("asset") == asset)["equity"].to_list()
+        peak = values[0]
+        worst = 0.0
+        for value in values:
+            peak = max(peak, value)
+            worst = min(worst, value / peak - 1.0)
+        return worst
+
+    results = [_metrics(asset, trades, initial_by_asset[asset], initial_by_asset[asset] + realized_by_asset[asset], drawdown(asset), first_timestamp, last_timestamp) for asset in assets]
+    results.append(_metrics("TOTAL", trades, initial_cash, cash, drawdown("TOTAL"), first_timestamp, last_timestamp))
+    return BacktestResult(results=pl.DataFrame(results), trades=trade_frame, strategy=pl.DataFrame(strategy_rows), equity=equity)
 
 
 def run(
@@ -128,155 +284,17 @@ def run(
     progress: ProgressCallback | None = None,
     monte_carlo_progress: MonteCarloProgressCallback | None = None,
 ) -> BacktestResult:
-    """Run backtest via original simulation engine.
+    """Build signals and simulate them with repository-owned code only."""
+    del monte_carlo_progress
+    from Dataframe.Frame import build
 
-    Translates TOML config → JSON5 temp file → calls original load_backtest_frames.
-    Guarantees trade parity with golden baseline.
-    """
-    # ── Save rebuilt packages; original engine imports both Backtest and Dataframe ──
-    original_package_prefixes = ("Backtest", "Dataframe")
-    saved: dict = {
-        key: value
-        for key, value in sys.modules.items()
-        if key.startswith(original_package_prefixes)
-    }
-    for k in list(sys.modules.keys()):
-        if k.startswith(original_package_prefixes):
-            del sys.modules[k]
-
-    # ── Temporarily put original FIRST on path ──
-    orig = str(_ORIGINAL)
-    rebuild = str(_ROOT)
-    if orig in sys.path:
-        sys.path.remove(orig)
-    sys.path.insert(0, orig)
-    if rebuild in sys.path:
-        sys.path.remove(rebuild)
-
-    config_path: str | None = None
-    try:
-        # Write temp JSON5 config
-        config_json = _build_config_json5(start, end, assets, initial_cash, strategy_override)
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".json5", delete=False, encoding="utf-8") as config_file:
-            config_file.write(config_json)
-            config_path = config_file.name
-
-        # Import original modules
-        import Strategy.trend.detector as _trend_detector  # type: ignore
-
-        import Backtest.Engine.backtester as _bt  # type: ignore
-        from Backtest.Engine.backtester import load_backtest_frames  # type: ignore
-        from Backtest.Engine.ohlcv_cache import CachingMariaAPI  # type: ignore
-
-        trend_overrides = (strategy_override or _toml("Strategy")).get("assets", {})
-        _orig_resolve_trend_params = _trend_detector.resolve_trend_params
-
-        def _rebuilt_trend_params(asset: str | None = None) -> dict:
-            params = deepcopy(_orig_resolve_trend_params(asset))
-            if asset is None:
-                return params
-            override = trend_overrides.get(asset, {})
-            half_lives = (
-                ("rdma_fast_half_life", "rdma_fast"),
-                ("rdma_medium_half_life", "rdma_medium"),
-                ("rdma_slow_half_life", "rdma_slow"),
-            )
-            for source, target in half_lives:
-                if source in override:
-                    params[target]["half_life"] = int(override[source])
-            if "slope_lookback" in override:
-                params["slope"]["lookback"] = int(override["slope_lookback"])
-            if "min_direction_bars" in override:
-                params["detector"]["minimum_direction_bars"] = int(override["min_direction_bars"])
-            return params
-
-        # ── Parallel strategy compute ──────────────────────────────────────────
-        # Monkeypatch build_final_strategy_dataframe in the backtester module so
-        # load_backtest_frames calls the parallel version transparently.
-        # Each asset slice is computed independently → no cross-asset leakage,
-        # identical results to sequential execution.
-        _seq_build = _bt.build_final_strategy_dataframe
-        _prog_lock = threading.Lock()
-
-        def _par_build(ohlcv, config=None, progress=None):  # type: ignore[no-untyped-def]
-            asset_list = ohlcv["asset"].unique().to_list()
-            if len(asset_list) <= 1:
-                return _seq_build(ohlcv, config=config, progress=progress)
-            n = min(len(asset_list), os.cpu_count() or 4)
-
-            def _one(asset: str) -> pl.DataFrame:
-                f = _seq_build(ohlcv.filter(pl.col("asset") == asset), config=config)
-                if progress is not None:
-                    with _prog_lock:
-                        progress(asset)
-                return f
-
-            with ThreadPoolExecutor(max_workers=n, thread_name_prefix="bt_strat") as pool:
-                parts = list(pool.map(_one, asset_list))
-            return pl.concat(parts).sort("timestamp", "asset")
-
-        _bt.build_final_strategy_dataframe = _par_build
-        _trend_detector.resolve_trend_params = _rebuilt_trend_params
-
-        # The original engine reads canonical settings from its own repository.
-        # Replace that read for this call so Portfolio.toml governs allocation and
-        # risk settings in both the generated config and engine internals.
-        _orig_load_shared_params = _bt.load_shared_params
-        _portfolio = _toml("Portfolio")
-        _shared_params = deepcopy(_orig_load_shared_params())
-        _shared_params.update({
-            "leverage": float(_portfolio["leverage"]),
-            "trade_size_percentage": float(_portfolio["trade_size_pct"]),
-            "take_profit_pct": float(_portfolio["take_profit_pct"]),
-            "checkpoint_trail_pct": float(_portfolio["checkpoint_trail_pct"]),
-            "short_trailing_stop_pct": float(_portfolio["short_trailing_stop_pct"]),
-            "short_exit_on_bullish_trend": bool(_portfolio["short_exit_on_bullish_trend"]),
-            "max_concurrent_shorts": int(_portfolio["max_concurrent_shorts"]),
-            "portfolio_weights": dict(_portfolio["allocation"]),
-        })
-        _bt.load_shared_params = lambda: deepcopy(_shared_params)
-        try:
-            cache_dir = _ROOT / ".cache" / "ohlcv"
-            frames = load_backtest_frames(
-                config_path,
-                progress=progress,
-                monte_carlo_progress=monte_carlo_progress,
-                maria_api=maria_api or CachingMariaAPI(cache_dir=cache_dir),
-            )
-        finally:
-            _bt.build_final_strategy_dataframe = _seq_build
-            _trend_detector.resolve_trend_params = _orig_resolve_trend_params
-            _bt.load_shared_params = _orig_load_shared_params
-
-        trades = frames.trades
-        if "side" not in trades.columns and "type" in trades.columns:
-            trades = trades.with_columns(pl.col("type").alias("side"))
-
-        return BacktestResult(
-            results=frames.results,
-            trades=trades,
-            strategy=frames.dataframes.get("Strategy", pl.DataFrame()),
-            equity=frames.dataframes.get("Equity", pl.DataFrame()),
-        )
-
-    finally:
-        # Clean up temp file
-        if config_path is not None:
-            try:
-                Path(config_path).unlink(missing_ok=True)
-            except OSError:
-                pass
-
-        # Restore rebuild-first path ordering
-        for k in list(sys.modules.keys()):
-            if k.startswith(original_package_prefixes):
-                del sys.modules[k]
-        sys.modules.update(saved)
-
-        if orig in sys.path:
-            sys.path.remove(orig)
-        if rebuild not in sys.path:
-            sys.path.insert(0, rebuild)
-        else:
-            sys.path.remove(rebuild)
-            sys.path.insert(0, rebuild)
+    bt = _toml("Backtest")
+    portfolio = _toml("Portfolio")
+    selected_assets = assets or list(bt["data"]["assets"])
+    selected_start = start or str(bt["data"]["start_date"])
+    selected_end = end or str(bt["data"]["end_date"])
+    ohlcv = _load_ohlcv(selected_assets, selected_start, selected_end, str(bt["data"].get("timeframe", "1h")), maria_api, progress)
+    base_strategy = _toml("Strategy")
+    strategy_config = strategy_override or base_strategy
+    strategy = build(ohlcv, strategy_config=strategy_config)
+    return _simulate(strategy, float(initial_cash if initial_cash is not None else bt["capital"]["initial_cash"]), portfolio, bt, strategy_config)

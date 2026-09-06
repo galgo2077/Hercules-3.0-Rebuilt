@@ -1,7 +1,7 @@
 use pyo3::prelude::*;
 
-mod core;
 mod build;
+mod core;
 
 #[pymodule]
 fn _strategy(m: &Bound<'_, PyModule>) -> PyResult<()> {

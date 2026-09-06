@@ -33,13 +33,23 @@ DECISION_COLUMNS = (
 )
 
 
-def asset_risk_params(asset: str, portfolio_toml: Path | None = None) -> dict:
+def asset_risk_params(
+    asset: str,
+    portfolio_toml: Path | None = None,
+    strategy_config: dict | None = None,
+    portfolio_config: dict | None = None,
+) -> dict:
     """Merged risk params for asset: Strategy.toml per-asset overrides Portfolio.toml base."""
     _pf = portfolio_toml or (_SHARED_DATA / "Portfolio.toml")
-    with _STRATEGY_TOML.open("rb") as f:
-        strategy = tomllib.load(f)
-    with _pf.open("rb") as f:
-        portfolio = tomllib.load(f)
+    if strategy_config is None:
+        with _STRATEGY_TOML.open("rb") as f:
+            strategy = tomllib.load(f)
+    else:
+        strategy = strategy_config
+    if portfolio_config is None:
+        with _pf.open("rb") as f:
+            portfolio_config = tomllib.load(f)
+    portfolio = portfolio_config
     result: dict = {k: portfolio.get(k) for k in _RISK_KEYS}
     for k, v in result.items():
         if v is not None:
@@ -50,22 +60,61 @@ def asset_risk_params(asset: str, portfolio_toml: Path | None = None) -> dict:
     return result
 
 
-def _load_require_slope() -> bool:
-    with _STRATEGY_TOML.open("rb") as f:
-        cfg = tomllib.load(f)
+def _load_require_slope(strategy_config: dict | None = None) -> bool:
+    if strategy_config is None:
+        with _STRATEGY_TOML.open("rb") as f:
+            cfg = tomllib.load(f)
+    else:
+        cfg = strategy_config
     return bool(cfg.get("conditions", {}).get("require_slope_confirmation", True))
 
 
-def _per_asset_trade_size(asset: str, portfolio_toml: Path) -> float:
-    """Return trade_size_pct for asset, applying per-asset override from Strategy.toml."""
-    with _STRATEGY_TOML.open("rb") as f:
-        strategy = tomllib.load(f)
-    with portfolio_toml.open("rb") as f:
-        portfolio = tomllib.load(f)
+def decide(
+    row: dict,
+    current_exposure: float,
+    *,
+    portfolio_toml: Path | None = None,
+    strategy_config: dict | None = None,
+    portfolio_config: dict | None = None,
+) -> dict:
+    """Return one target-position decision from current authoritative state."""
+    import _strategy
 
-    base = float(portfolio.get("trade_size_pct", 0.30))
-    override = strategy.get("assets", {}).get(asset, {}).get("trade_size_pct")
-    return float(override) if override is not None else base
+    asset = str(row["asset"])
+    signal = int(row["final_signal"])
+    if signal not in (-1, 0, 1):
+        raise ValueError(f"invalid final_signal for {asset}: {signal}")
+    slope = row.get("slope")
+    slope_value = float(slope) if slope is not None and math.isfinite(float(slope)) else float("nan")
+    current_side = 1 if current_exposure > 1e-9 else (-1 if current_exposure < -1e-9 else 0)
+    strategy_input = _strategy.StrategyInput(
+        timestamp_ms=int(row["timestamp"].timestamp() * 1000),
+        asset=asset,
+        direction=row.get("direction"),
+        final_signal=signal,
+        short_trend_similarity=float(row.get("short_trend_similarity") or 0.0),
+        slope=slope_value,
+        warmup_complete=True,
+    )
+    long_score, short_score = _strategy.evaluate(strategy_input, current_side, _load_require_slope(strategy_config))
+    target = float(
+        asset_risk_params(
+            asset,
+            portfolio_toml=portfolio_toml,
+            strategy_config=strategy_config,
+            portfolio_config=portfolio_config,
+        )["trade_size_pct"]
+    )
+    result = _strategy.build_decision(strategy_input.timestamp_ms, asset, long_score, short_score, current_exposure, target, target)
+    return {
+        "action": result.action,
+        "side": result.side,
+        "target_exposure": result.target_exposure,
+        "exposure_delta": result.exposure_delta,
+        "entry_allowed": result.entry_allowed,
+        "exit_required": result.exit_required,
+        "reason": result.reason,
+    }
 
 
 def evaluate(
@@ -73,6 +122,7 @@ def evaluate(
     *,
     asset_exposures: dict[str, float] | None = None,
     portfolio_toml: Path | None = None,
+    strategy_config: dict | None = None,
 ) -> pl.DataFrame:
     """Apply Rust strategy core row-by-row to the Hercules Frame.
 
@@ -82,10 +132,15 @@ def evaluate(
     asset_exposures: optional current signed exposure per asset (default all flat).
     portfolio_toml: path to Portfolio.toml (default SharedData directory).
     """
-    import _strategy  # Rust native module
-
     _portfolio_toml = portfolio_toml or (_SHARED_DATA / "Portfolio.toml")
-    require_slope = _load_require_slope()
+    if frame.is_empty():
+        return frame.with_columns(
+            *(pl.Series(name, [], dtype=pl.String) for name in ("action", "side", "reason")),
+            *(pl.Series(name, [], dtype=pl.Float64) for name in ("target_exposure", "exposure_delta")),
+            *(pl.Series(name, [], dtype=pl.Boolean) for name in ("entry_allowed", "exit_required")),
+        )
+    with _portfolio_toml.open("rb") as handle:
+        portfolio_config = tomllib.load(handle)
 
     # current signed exposure per asset (positive=long, negative=short)
     exposure: dict[str, float] = dict(asset_exposures or {})
@@ -96,69 +151,24 @@ def evaluate(
     for row in sorted_frame.iter_rows(named=True):
         asset = row["asset"]
         current_exposure = exposure.get(asset, 0.0)
-        current_side = 1 if current_exposure > 1e-9 else (-1 if current_exposure < -1e-9 else 0)
-
-        slope = row.get("slope")
-        slope_f = slope if (slope is not None and not math.isnan(slope)) else float("nan")
-
-        inp = _strategy.StrategyInput(
-            timestamp_ms=int(row["timestamp"].timestamp() * 1000),
-            asset=asset,
-            direction=row.get("direction"),
-            final_signal=int(row["final_signal"]),
-            short_trend_similarity=float(row.get("short_trend_similarity") or 0.0),
-            slope=slope_f,
-            warmup_complete=True,
-        )
-
-        long_score, short_score = _strategy.evaluate(inp, current_side, require_slope)
-
-        trade_size = _per_asset_trade_size(asset, _portfolio_toml)
-        result = _strategy.build_decision(
-            inp.timestamp_ms,
-            asset,
-            long_score,
-            short_score,
+        decision = decide(
+            row,
             current_exposure,
-            trade_size,
-            trade_size,
+            portfolio_toml=_portfolio_toml,
+            strategy_config=strategy_config,
+            portfolio_config=portfolio_config,
         )
 
-        # LONGs have no exit — suppress reversal_to_short, preserve exposure
-        long_suppressed = result.reason == "reversal_to_short" and current_exposure > 1e-9
-        if long_suppressed:
-            action_out = "Hold"
-            side_out = "Long"
-            target_out = current_exposure
-            delta_out = 0.0
-            entry_allowed_out = False
-            exit_required_out = False
-            reason_out = "long_hold_no_exit"
-        else:
-            action_out = result.action
-            side_out = result.side
-            target_out = result.target_exposure
-            delta_out = result.exposure_delta
-            entry_allowed_out = result.entry_allowed
-            exit_required_out = result.exit_required
-            reason_out = result.reason
-
-        if entry_allowed_out:
-            exposure[asset] = target_out
+        if decision["entry_allowed"]:
+            exposure[asset] = decision["target_exposure"]
 
         results.append(
             {
                 "timestamp": row["timestamp"],
                 "asset": asset,
-                "action": action_out,
-                "side": side_out,
-                "target_exposure": target_out,
-                "exposure_delta": delta_out,
-                "entry_allowed": entry_allowed_out,
-                "exit_required": exit_required_out,
-                "reason": reason_out,
+                **decision,
             }
         )
 
-    decisions = pl.DataFrame(results)
+    decisions = pl.DataFrame(results).with_columns(pl.col("timestamp").cast(frame.schema["timestamp"]))
     return frame.join(decisions, on=["timestamp", "asset"], how="left")

@@ -17,7 +17,11 @@ minimum_max_drawdown_pct = -65.0
 minimum_roi_to_drawdown = 2.0
 
 [ranges]
-minimum_confidence = 0.35
-maximum_confidence = 0.48
-minimum_score = 0.37
-maximum_score = 0.50
+rdma_fast_half_life_min   = 15
+rdma_fast_half_life_max   = 35
+rdma_medium_half_life_min = 60
+rdma_medium_half_life_max = 140
+rdma_slow_half_life_min   = 180
+rdma_slow_half_life_max   = 320
+min_direction_bars_min    = 10
+min_direction_bars_max    = 40

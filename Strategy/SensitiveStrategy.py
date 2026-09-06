@@ -24,16 +24,18 @@ def make_sensitive_frame(asset: str, n_candles: int, start_price: float = 100.0)
     highs = [o + 0.15 for o in opens]
     lows = [o - 0.05 for o in opens]
 
-    return pl.DataFrame({
-        "timestamp": timestamps,
-        "open": opens,
-        "high": highs,
-        "low": lows,
-        "close": closes,
-        "volume": [1000.0] * n_candles,
-        "asset": [asset] * n_candles,
-        "direction": directions,
-        "short_trend_similarity": [0.6] * n_candles,
-        "final_signal": signals,
-        "slope": slopes,
-    })
+    return pl.DataFrame(
+        {
+            "timestamp": timestamps,
+            "open": opens,
+            "high": highs,
+            "low": lows,
+            "close": closes,
+            "volume": [1000.0] * n_candles,
+            "asset": [asset] * n_candles,
+            "direction": directions,
+            "short_trend_similarity": [0.6] * n_candles,
+            "final_signal": signals,
+            "slope": slopes,
+        }
+    )

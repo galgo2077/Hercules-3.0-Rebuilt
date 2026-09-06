@@ -1,18 +1,17 @@
-"""Hercules Frame pipeline — delegates to Strategy.getData via original repo bridge."""
+"""Deterministic, self-contained Hercules strategy-frame construction."""
 
 from __future__ import annotations
 
-import os
-import sys
-import threading
+import math
 import tomllib
 from collections.abc import Callable
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+import numpy as np
 import polars as pl
 
-_ORIGINAL_REPO = Path("/home/void/Documents/Hercules 3.0")
+from Dataframe.Compute import rolling_slope
+
 _STRATEGY_TOML = Path(__file__).parent.parent / "SharedData" / "Strategy.toml"
 
 FRAME_COLUMNS = (
@@ -29,77 +28,68 @@ FRAME_COLUMNS = (
     "slope",
 )
 
-_ALL_CONDITION_FIELDS = (
-    "minimum_volatility_regime",
-    "long_entry_minimum_candles",
-    "short_trend_window",
-    "short_entry_minimum_bearish_bars",
-    "require_slope_confirmation",
-    "bullish_direction",
-    "bearish_direction",
-    "sideways_direction",
-    "buy_indicator_signal",
-    "sell_indicator_signal",
-)
 
-_SIGNAL_TOML_KEYS = {
-    "signal_minimum_overall_confidence": "thresholds.minimum_overall_confidence",
-    "signal_minimum_signal_score": "thresholds.minimum_signal_score",
-}
+def _strategy_config() -> dict:
+    with _STRATEGY_TOML.open("rb") as handle:
+        return tomllib.load(handle)
 
 
-def _build_config() -> dict:
-    with _STRATEGY_TOML.open("rb") as f:
-        cfg = tomllib.load(f)
-
-    global_conditions = cfg.get("conditions", {})
-    asset_params = cfg.get("assets", {})
-
-    base = {
-        "minimum_volatility_regime": global_conditions.get("minimum_volatility_regime", 1),
-        "long_entry_minimum_candles": global_conditions.get("long_entry_minimum_candles", 0),
-        "short_trend_window": global_conditions.get("short_trend_window", 5),
-        "short_entry_minimum_bearish_bars": global_conditions.get("short_entry_minimum_bearish_bars", 0),
-        "require_slope_confirmation": global_conditions.get("require_slope_confirmation", True),
-        "bullish_direction": global_conditions.get("bullish_direction", "BULLISH"),
-        "bearish_direction": global_conditions.get("bearish_direction", "BEARISH"),
-        "sideways_direction": global_conditions.get("sideways_direction", "SIDEWAYS"),
-        "buy_indicator_signal": global_conditions.get("buy_indicator_signal", "buy"),
-        "sell_indicator_signal": global_conditions.get("sell_indicator_signal", "sell"),
-    }
-
-    known_assets = ("BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT")
-    strategy_by_asset: dict = {}
-    indicator_by_asset: dict = {}
-
-    for asset in known_assets:
-        params = asset_params.get(asset, {})
-        conditions = dict(base)
-        for field in _ALL_CONDITION_FIELDS:
-            if field in params:
-                conditions[field] = params[field]
-        strategy_by_asset[asset] = {"enabled": True, "conditions": conditions}
-
-        signal_overrides = {dot: params[toml_key] for toml_key, dot in _SIGNAL_TOML_KEYS.items() if toml_key in params}
-        if signal_overrides:
-            indicator_by_asset[asset] = {"signal": signal_overrides}
-
-    return {
-        "Strategy_by_asset": strategy_by_asset,
-        "Indicator_by_asset": indicator_by_asset,
-    }
+def _ewma(values: np.ndarray, half_life: int) -> np.ndarray:
+    if half_life <= 0:
+        raise ValueError("RDMA half-life must be positive")
+    alpha = 1.0 - math.exp(math.log(0.5) / half_life)
+    result = np.empty_like(values, dtype=np.float64)
+    result[0] = values[0]
+    for index in range(1, len(values)):
+        result[index] = alpha * values[index] + (1.0 - alpha) * result[index - 1]
+    return result
 
 
-def _ensure_original_on_path() -> None:
-    rebuild = str(_ORIGINAL_REPO.parent / "hercules 3.0 rebuilt")
-    original = str(_ORIGINAL_REPO)
-    if original not in sys.path:
-        sys.path.append(original)
-    if rebuild not in sys.path:
-        sys.path.insert(0, rebuild)
-    elif sys.path[0] != rebuild:
-        sys.path.remove(rebuild)
-        sys.path.insert(0, rebuild)
+def _consecutive(values: list[str]) -> np.ndarray:
+    counts = np.ones(len(values), dtype=np.int64)
+    for index in range(1, len(values)):
+        counts[index] = counts[index - 1] + 1 if values[index] == values[index - 1] else 1
+    return counts
+
+
+def _build_asset(frame: pl.DataFrame, params: dict, conditions: dict) -> pl.DataFrame:
+    frame = frame.sort("timestamp")
+    close = frame["close"].to_numpy()
+    if len(close) == 0:
+        return frame
+
+    fast = _ewma(close, int(params.get("rdma_fast_half_life", 25)))
+    medium = _ewma(close, int(params.get("rdma_medium_half_life", 100)))
+    slow = _ewma(close, int(params.get("rdma_slow_half_life", 250)))
+    bullish = str(conditions.get("bullish_direction", "BULLISH"))
+    bearish = str(conditions.get("bearish_direction", "BEARISH"))
+    sideways = str(conditions.get("sideways_direction", "SIDEWAYS"))
+    directions = np.where((fast > medium) & (medium > slow), bullish, np.where((fast < medium) & (medium < slow), bearish, sideways)).tolist()
+    runs = _consecutive(directions)
+
+    short_window = max(1, int(params.get("short_trend_window", conditions.get("short_trend_window", 5))))
+    bearish_values = np.asarray([direction == bearish for direction in directions], dtype=np.float64)
+    similarity = np.empty(len(close), dtype=np.float64)
+    for index in range(len(close)):
+        start = max(0, index - short_window + 1)
+        similarity[index] = bearish_values[start : index + 1].mean()
+
+    minimum_direction = max(1, int(params.get("min_direction_bars", 1)))
+    minimum_bearish = max(1, int(params.get("short_entry_minimum_bearish_bars", conditions.get("short_entry_minimum_bearish_bars", 1))))
+    signal = np.zeros(len(close), dtype=np.int8)
+    for index, direction in enumerate(directions):
+        if direction == bullish and runs[index] >= minimum_direction:
+            signal[index] = 1
+        elif direction == bearish and runs[index] >= max(minimum_direction, minimum_bearish):
+            signal[index] = -1
+
+    slope = rolling_slope(slow, max(2, int(params.get("slope_lookback", 6))))
+    return frame.with_columns(
+        pl.Series("direction", directions, dtype=pl.String),
+        pl.Series("short_trend_similarity", similarity, dtype=pl.Float64),
+        pl.Series("final_signal", signal, dtype=pl.Int8),
+        pl.Series("slope", slope, dtype=pl.Float64),
+    )
 
 
 def _validate(frame: pl.DataFrame) -> None:
@@ -113,44 +103,27 @@ def build(
     progress: Callable[[str], None] | None = None,
     *,
     n_workers: int | None = None,
+    strategy_config: dict | None = None,
 ) -> pl.DataFrame:
-    """Run the full Hercules strategy pipeline and return Hercules Frame.
+    """Build signals from OHLCV without relying on another repository."""
+    del n_workers
+    if "timestamp" not in ohlcv.columns and "open_time" in ohlcv.columns:
+        ohlcv = ohlcv.rename({"open_time": "timestamp"})
+    required = {"timestamp", "open", "high", "low", "close", "volume", "asset"}
+    missing = required - set(ohlcv.columns)
+    if missing:
+        raise ValueError(f"OHLCV missing columns: {sorted(missing)}")
+    if ohlcv.is_empty():
+        return pl.DataFrame(schema={column: pl.Null for column in FRAME_COLUMNS})
 
-    Multi-asset input processed in parallel (one thread per asset).
-    Each asset sees only its own data — no cross-asset leakage.
-
-    Columns produced: timestamp, open, high, low, close, volume, asset,
-    direction, short_trend_similarity, final_signal (Int8), slope.
-    """
-    _ensure_original_on_path()
-    # Import in main thread before spawning workers — keeps sys.path safe.
-    from Strategy.getData import build_final_strategy_dataframe  # type: ignore[import]
-
-    config = _build_config()
-    assets = ohlcv["asset"].unique().to_list()
-
-    if len(assets) <= 1:
-        frame = build_final_strategy_dataframe(ohlcv, config=config, progress=progress)
-        _validate(frame)
-        return frame.select(*FRAME_COLUMNS)
-
-    # Multi-asset: each asset slice is independent — split, compute in parallel, concat.
-    n = min(len(assets), n_workers or os.cpu_count() or 4)
-    lock = threading.Lock()
-
-    def _build_one(asset: str) -> pl.DataFrame:
-        result = build_final_strategy_dataframe(
-            ohlcv.filter(pl.col("asset") == asset),
-            config=config,
-        )
+    cfg = strategy_config or _strategy_config()
+    conditions = cfg.get("conditions", {})
+    parts: list[pl.DataFrame] = []
+    for asset in ohlcv["asset"].unique(maintain_order=True).to_list():
+        params = {**conditions, **cfg.get("assets", {}).get(asset, {})}
+        parts.append(_build_asset(ohlcv.filter(pl.col("asset") == asset), params, conditions))
         if progress is not None:
-            with lock:
-                progress(asset)
-        return result
-
-    with ThreadPoolExecutor(max_workers=n, thread_name_prefix="frame") as pool:
-        parts = list(pool.map(_build_one, assets))
-
+            progress(asset)
     frame = pl.concat(parts).sort("timestamp", "asset")
     _validate(frame)
     return frame.select(*FRAME_COLUMNS)

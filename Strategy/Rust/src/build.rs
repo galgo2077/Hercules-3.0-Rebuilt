@@ -78,7 +78,14 @@ pub fn build_decision(
         }
     } else if !is_flat {
         // no new signal while positioned — execution engine handles TP/SL
-        ("Hold", if is_long { "Long" } else { "Short" }, current_exposure, false, false, "hold_in_position")
+        (
+            "Hold",
+            if is_long { "Long" } else { "Short" },
+            current_exposure,
+            false,
+            false,
+            "hold_in_position",
+        )
     } else {
         ("Hold", "None", 0.0, false, false, "hold_flat")
     };

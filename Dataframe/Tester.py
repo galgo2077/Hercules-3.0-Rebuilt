@@ -5,7 +5,7 @@ import math
 from Dataframe.Binance import OHLCV_SCHEMA
 from Dataframe.CandleBuffer import CandleBuffer
 from Dataframe.Compute import backend, rolling_mean, rolling_slope
-from Dataframe.Frame import FRAME_COLUMNS, _build_config
+from Dataframe.Frame import FRAME_COLUMNS
 
 passed = 0
 total = 0
@@ -69,12 +69,6 @@ check("Binance.OHLCV_SCHEMA keys", expected_keys == set(OHLCV_SCHEMA.keys()), se
 # ── Frame ────────────────────────────────────────────────────────────────────
 
 check("Frame.FRAME_COLUMNS len=11", len(FRAME_COLUMNS) == 11, len(FRAME_COLUMNS))
-
-cfg = _build_config()
-assets = ("BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT")
-check("Frame._build_config has Strategy_by_asset", "Strategy_by_asset" in cfg, list(cfg.keys()))
-check("Frame._build_config has Indicator_by_asset", "Indicator_by_asset" in cfg, list(cfg.keys()))
-check("Frame._build_config all 4 assets", all(a in cfg["Strategy_by_asset"] for a in assets), list(cfg["Strategy_by_asset"].keys()))
 
 # ── Summary ───────────────────────────────────────────────────────────────────
 print(f"\n{passed}/{total} passed")

@@ -67,7 +67,7 @@ pub fn evaluate(
     current_side: i8,
     require_slope_confirmation: bool,
 ) -> (f64, f64) {
-    if !input.warmup_complete || input.final_signal == 0 {
+    if !input.warmup_complete || !matches!(input.final_signal, -1..=1) || input.final_signal == 0 {
         return (0.0, 0.0);
     }
     if !is_new_entry(current_side, input.final_signal) {
@@ -96,7 +96,15 @@ mod tests {
     use super::*;
 
     fn make_input(signal: i8, slope: f64) -> StrategyInput {
-        StrategyInput::new(0, "BTCUSDT".into(), Some("BULLISH".into()), signal, 0.5, slope, true)
+        StrategyInput::new(
+            0,
+            "BTCUSDT".into(),
+            Some("BULLISH".into()),
+            signal,
+            0.5,
+            slope,
+            true,
+        )
     }
 
     #[test]
@@ -145,6 +153,12 @@ mod tests {
     fn warmup_blocks_signal() {
         let mut inp = make_input(1, 0.1);
         inp.warmup_complete = false;
+        assert_eq!(evaluate(&inp, 0, false), (0.0, 0.0));
+    }
+
+    #[test]
+    fn invalid_signal_is_not_treated_as_short() {
+        let inp = make_input(2, -0.1);
         assert_eq!(evaluate(&inp, 0, false), (0.0, 0.0));
     }
 }
