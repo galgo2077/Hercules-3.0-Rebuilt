@@ -1,5 +1,7 @@
 """CandleBuffer: ingest, dedup, ready gate, health, WS parse, reset."""
 
+import pytest
+
 from Dataframe.CandleBuffer import CandleBuffer
 
 
@@ -32,9 +34,15 @@ def test_capacity_evicts_oldest():
 
 def test_dedup_same_timestamp():
     buf = CandleBuffer()
-    buf.ingest("BTCUSDT", _candle(0), is_closed=True)
-    buf.ingest("BTCUSDT", _candle(0), is_closed=True)
+    assert buf.ingest("BTCUSDT", _candle(0), is_closed=True)
+    assert not buf.ingest("BTCUSDT", _candle(0), is_closed=True)
     assert len(buf.get("BTCUSDT")) == 1
+
+
+def test_older_candle_is_rejected():
+    buf = CandleBuffer()
+    assert buf.ingest("BTCUSDT", _candle(2), is_closed=True)
+    assert not buf.ingest("BTCUSDT", _candle(1), is_closed=True)
 
 
 def test_open_candle_not_stored():
@@ -71,6 +79,12 @@ def test_ingest_ws_not_closed():
     buf = CandleBuffer()
     msg = {"stream": "btcusdt@kline_1h", "data": {"k": {**_candle(0), "x": False}}}
     assert not buf.ingest_ws("BTCUSDT", msg)
+
+
+@pytest.mark.parametrize("kline", [{"t": 1, "x": True}, {"t": 1, "o": 0, "h": 1, "l": 0, "c": 1, "v": 1, "x": True}])
+def test_malformed_closed_candle_is_rejected(kline):
+    with pytest.raises(ValueError, match="kline"):
+        CandleBuffer().ingest_ws("BTCUSDT", {"data": {"k": kline}})
 
 
 def test_reset_single_asset():

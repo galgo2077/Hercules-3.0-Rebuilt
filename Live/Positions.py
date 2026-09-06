@@ -23,28 +23,40 @@ class Position:
 
 class PositionTracker:
     def __init__(self) -> None:
-        self._positions: dict[str, Position] = {}
+        self._positions: dict[tuple[str, str], Position] = {}
 
     def fetch(self, client: BinanceClient) -> None:
         raw = client.get("/fapi/v2/positionRisk")
+        if not isinstance(raw, list):
+            raise RuntimeError("exchange returned invalid position state")
+        self._positions.clear()
         for p in raw:
             symbol = p["symbol"]
             amt = float(p["positionAmt"])
             mark = float(p["markPrice"])
             entry = float(p["entryPrice"])
             upnl = float(p["unRealizedProfit"])
-            if abs(amt) < 1e-9:
-                side, usdt = "FLAT", 0.0
-            elif amt > 0:
-                side, usdt = "LONG", abs(amt) * mark
-            else:
-                side, usdt = "SHORT", abs(amt) * mark
-            self._positions[symbol] = Position(symbol, side, usdt, entry, mark, upnl)
+            position_side = str(p.get("positionSide", "BOTH"))
+            if position_side == "BOTH":
+                if abs(amt) < 1e-9:
+                    continue
+                position_side = "LONG" if amt > 0 else "SHORT"
+            if position_side not in {"LONG", "SHORT"}:
+                raise RuntimeError(f"invalid exchange position side: {position_side}")
+            side = position_side if abs(amt) >= 1e-9 else "FLAT"
+            self._positions[(symbol, position_side)] = Position(symbol, side, abs(amt) * mark, entry, mark, upnl)
 
-    def get(self, asset: str) -> Position:
-        return self._positions.get(asset, Position(asset, "FLAT", 0.0, 0.0, 0.0, 0.0))
+    def get(self, asset: str, side: str | None = None) -> Position:
+        if side is not None:
+            return self._positions.get((asset, side), Position(asset, "FLAT", 0.0, 0.0, 0.0, 0.0))
+        open_positions = [position for candidate in ("LONG", "SHORT") if (position := self._positions.get((asset, candidate))) and not position.is_flat]
+        if len(open_positions) > 1:
+            raise RuntimeError(f"both LONG and SHORT are open for {asset}")
+        if open_positions:
+            return open_positions[0]
+        return Position(asset, "FLAT", 0.0, 0.0, 0.0, 0.0)
 
-    def all(self) -> dict[str, Position]:
+    def all(self) -> dict[tuple[str, str], Position]:
         return dict(self._positions)
 
     def exposure(self, asset: str, allocated_usdt: float) -> float:

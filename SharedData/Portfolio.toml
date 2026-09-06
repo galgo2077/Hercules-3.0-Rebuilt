@@ -5,9 +5,9 @@ leverage           = 10.0
 trade_size_pct     = 0.25
 
 take_profit_pct          = 0.025
+stop_loss_pct            = 0.06
 checkpoint_trail_pct     = 0.012
 short_trailing_stop_pct  = 0.015
-# stop_loss_pct disabled globally; per-asset override in Strategy.toml
 
 short_exit_on_bullish_trend = true
 max_concurrent_shorts       = 5

@@ -2,6 +2,8 @@
 
 import json
 
+import pytest
+
 from Live.Risk import (
     RiskState,
     check_entry,
@@ -94,3 +96,11 @@ def test_kill_switch_active(tmp_path, monkeypatch):
     ok, reason = check_entry(s, "LONG", "BTCUSDT", 10.0)
     assert not ok
     assert "kill" in reason
+
+
+@pytest.mark.parametrize("content", ["[]", "null", '"active"', "1"])
+def test_kill_switch_non_object_json_fails_closed(tmp_path, monkeypatch, content):
+    kf = tmp_path / "kill.json"
+    kf.write_text(content)
+    monkeypatch.setattr("Live.Risk._KILL", kf)
+    assert kill_active()

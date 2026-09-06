@@ -16,6 +16,7 @@ _FLAT_THRESHOLD = 0.01  # USDT — positions smaller than this treated as flat
 @dataclass(frozen=True, slots=True)
 class Mismatch:
     asset: str
+    position_side: str
     local_side: str  # LONG | SHORT | FLAT
     exchange_side: str
     local_usdt: float
@@ -25,27 +26,30 @@ class Mismatch:
 def reconcile(
     tracker: PositionTracker,
     client: BinanceClient,
-    assets: list[str],
+    assets: list[str] | None = None,
 ) -> list[Mismatch]:
     """Compare local PositionTracker against exchange, return list of divergences."""
     # fetch fresh exchange state into a temp tracker
     live = PositionTracker()
     live.fetch(client)
+    assets = sorted(set(assets or ()) | {asset for asset, _ in tracker.all()} | {asset for asset, _ in live.all()})
 
     mismatches: list[Mismatch] = []
     for asset in assets:
-        local = tracker.get(asset)
-        exchange = live.get(asset)
-        if local.side != exchange.side or abs(local.size_usdt - exchange.size_usdt) > _FLAT_THRESHOLD:
-            m = Mismatch(
-                asset=asset,
-                local_side=local.side,
-                exchange_side=exchange.side,
-                local_usdt=local.size_usdt,
-                exchange_usdt=exchange.size_usdt,
-            )
-            log.warning("reconcile mismatch %s: local=%s(%.2f) exchange=%s(%.2f)", asset, local.side, local.size_usdt, exchange.side, exchange.size_usdt)
-            mismatches.append(m)
+        for side in ("LONG", "SHORT"):
+            local = tracker.get(asset, side)
+            exchange = live.get(asset, side)
+            if local.side != exchange.side or abs(local.size_usdt - exchange.size_usdt) > _FLAT_THRESHOLD:
+                mismatch = Mismatch(
+                    asset=asset,
+                    position_side=side,
+                    local_side=local.side,
+                    exchange_side=exchange.side,
+                    local_usdt=local.size_usdt,
+                    exchange_usdt=exchange.size_usdt,
+                )
+                log.warning("reconcile mismatch %s %s: local=%.2f exchange=%.2f", asset, side, local.size_usdt, exchange.size_usdt)
+                mismatches.append(mismatch)
 
     return mismatches
 
@@ -59,13 +63,13 @@ def resolve(mismatch: Mismatch, client: BinanceClient) -> None:
     from Live.Orders import Long, Short
 
     asset = mismatch.asset
-    ex_side = mismatch.exchange_side
+    ex_side = mismatch.position_side
 
-    if ex_side == "LONG" and mismatch.local_side == "FLAT":
+    if mismatch.exchange_side == "LONG" and mismatch.local_side == "FLAT":
         log.warning("resolve: closing unexpected LONG on %s", asset)
         Long.exit(client, asset)
 
-    elif ex_side == "SHORT" and mismatch.local_side == "FLAT":
+    elif mismatch.exchange_side == "SHORT" and mismatch.local_side == "FLAT":
         log.warning("resolve: closing unexpected SHORT on %s", asset)
         Short.exit(client, asset)
 
@@ -74,9 +78,8 @@ def resolve(mismatch: Mismatch, client: BinanceClient) -> None:
         log.info("resolve: exchange is flat for %s, local was %s — syncing", asset, mismatch.local_side)
 
 
-def sync_tracker(tracker: PositionTracker, client: BinanceClient) -> list[Mismatch]:
+def sync_tracker(tracker: PositionTracker, client: BinanceClient, assets: list[str] | None = None) -> list[Mismatch]:
     """Reconcile, resolve all mismatches, then re-fetch to bring tracker current."""
-    assets = list(tracker.all().keys()) or []
     mismatches = reconcile(tracker, client, assets)
     for m in mismatches:
         resolve(m, client)

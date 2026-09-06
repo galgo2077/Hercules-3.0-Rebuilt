@@ -14,7 +14,8 @@ from typing import Any
 import websockets
 
 from Dataframe.CandleBuffer import CandleBuffer
-from Live.Risk import RiskState, check_entry, eviction_priority, on_entry, on_exit
+from Live.Execution import stream_asset
+from Live.Risk import RiskState, check_entry, on_entry, on_exit, size_trade
 
 log = logging.getLogger(__name__)
 
@@ -38,8 +39,8 @@ class VirtualPosition:
     entry_price: float = 0.0
     size_usdt: float = 0.0
     open_time: float = field(default_factory=time.time)
-    stop_loss_price: float | None = None   # SHORT only
-    take_profit_price: float | None = None  # SHORT only
+    stop_loss_price: float | None = None
+    take_profit_price: float | None = None
 
 
 @dataclass
@@ -64,7 +65,8 @@ class PaperEngine:
         self._positions: dict[str, VirtualPosition] = {}
         self._trades: list[PaperTrade] = []
         self._running = False
-        cash = float(self._pf.get("initial_cash", 100.0))
+        with (_ROOT / "SharedData" / "Backtest.toml").open("rb") as handle:
+            cash = float(tomllib.load(handle)["capital"]["initial_cash"])
         self._risk = RiskState(
             initial_equity=cash,
             current_equity=cash,
@@ -90,16 +92,20 @@ class PaperEngine:
     ) -> None:
         price = self._current_price(asset)
         if price <= 0:
-            return
-        sl = round(price * (1.0 + stop_loss_pct), 2) if stop_loss_pct and side == "SHORT" else None
-        tp = round(price * (1.0 - take_profit_pct), 2) if take_profit_pct and side == "SHORT" else None
+            raise RuntimeError(f"no valid market price for {asset}")
+        if stop_loss_pct is None and take_profit_pct is None:
+            raise ValueError("at least one protective exit is required")
+        sl = round(price * (1.0 - stop_loss_pct if side == "LONG" else 1.0 + stop_loss_pct), 8) if stop_loss_pct is not None else None
+        tp = round(price * (1.0 + take_profit_pct if side == "LONG" else 1.0 - take_profit_pct), 8) if take_profit_pct is not None else None
         self._positions[asset] = VirtualPosition(
-            asset=asset, side=side, entry_price=price, size_usdt=amount,
-            stop_loss_price=sl, take_profit_price=tp,
+            asset=asset,
+            side=side,
+            entry_price=price,
+            size_usdt=amount,
+            stop_loss_price=sl,
+            take_profit_price=tp,
         )
-        log.info("PAPER %s %s @ %.4f (%.2f USDT) SL=%s TP=%s",
-                 side, asset, price, amount,
-                 f"{sl:.4f}" if sl else "none", f"{tp:.4f}" if tp else "none")
+        log.info("PAPER %s %s @ %.4f (%.2f USDT) SL=%s TP=%s", side, asset, price, amount, f"{sl:.4f}" if sl else "none", f"{tp:.4f}" if tp else "none")
 
     def _exit(self, asset: str) -> None:
         pos = self._positions.pop(asset, None)
@@ -125,79 +131,68 @@ class PaperEngine:
         import polars as pl
 
         from Dataframe.Frame import build
-        from Strategy.Strategy import asset_risk_params, evaluate
+        from Strategy.Strategy import asset_risk_params, decide
 
         stream = msg.get("stream", "")
-        asset = stream.split("@")[0].upper() + "USDT" if "@" in stream else ""
-        if asset not in self._assets:
+        asset = stream_asset(stream, self._assets)
+        if asset is None:
             return
         if not self._buffer.ingest_ws(asset, msg):
             return
         if not self._buffer.ready(asset, _MIN_BARS):
             return
 
-        ohlcv = pl.DataFrame(self._buffer.to_dicts(asset)).with_columns(
-            pl.from_epoch(pl.col("timestamp"), time_unit="ms").alias("timestamp")
-        )
+        ohlcv = pl.DataFrame(self._buffer.to_dicts(asset)).with_columns(pl.from_epoch(pl.col("timestamp"), time_unit="ms").alias("timestamp"))
 
-        # Check SL/TP for active short before running strategy
+        # Apply protection before evaluating a new target. If both levels were
+        # crossed in one candle, the stop wins (fail-conservative ordering).
         pos = self._positions.get(asset)
-        if pos and pos.side == "SHORT":
+        if pos:
             candle = ohlcv.tail(1)
             candle_high = float(candle["high"][0])
             candle_low = float(candle["low"][0])
-            if pos.stop_loss_price is not None and candle_high >= pos.stop_loss_price:
-                log.info("PAPER SL hit %s high=%.4f sl=%.4f", asset, candle_high, pos.stop_loss_price)
+            stop_hit = pos.stop_loss_price is not None and (candle_low <= pos.stop_loss_price if pos.side == "LONG" else candle_high >= pos.stop_loss_price)
+            take_hit = pos.take_profit_price is not None and (candle_high >= pos.take_profit_price if pos.side == "LONG" else candle_low <= pos.take_profit_price)
+            if stop_hit:
+                log.info("PAPER SL hit %s sl=%.4f", asset, pos.stop_loss_price)
                 self._exit(asset)
-                on_exit(self._risk, "SHORT")
+                on_exit(self._risk, pos.side)
                 return
-            if pos.take_profit_price is not None and candle_low <= pos.take_profit_price:
-                log.info("PAPER TP hit %s low=%.4f tp=%.4f", asset, candle_low, pos.take_profit_price)
+            if take_hit:
+                log.info("PAPER TP hit %s tp=%.4f", asset, pos.take_profit_price)
                 self._exit(asset)
-                on_exit(self._risk, "SHORT")
+                on_exit(self._risk, pos.side)
                 return
 
         pos = self._positions.get(asset)
         exposure = {asset: (1.0 if pos and pos.side == "LONG" else -1.0 if pos and pos.side == "SHORT" else 0.0)}
         frame = build(ohlcv)
-        decisions = evaluate(frame.filter(pl.col("asset") == asset), asset_exposures=exposure)
-        last = decisions.filter(pl.col("asset") == asset).sort("timestamp").tail(1)
+        last = frame.filter(pl.col("asset") == asset).sort("timestamp").tail(1)
         if last.is_empty():
             return
 
-        row = last.row(0, named=True)
+        frame_row = last.row(0, named=True)
+        row = {**frame_row, **decide(frame_row, exposure[asset])}
         action = row.get("action", "Hold")
         side = row.get("side", "")
         risk = asset_risk_params(asset)
-        weight = float(self._pf.get("allocation", {}).get(asset, 0.0))
-        leverage = int(risk["leverage"] or 1)
-        amount = self._risk.current_equity * weight * (risk["trade_size_pct"] or 0.30) * leverage
+        amount = size_trade(self._risk.current_equity, asset, portfolio=self._pf, risk=risk)
 
         if action == "Entry":
             ex_side = "LONG" if side == "Long" else "SHORT"
             current = self._positions.get(asset)
-            if ex_side == "SHORT" and current and current.side == "LONG":
-                # LONGs have no exit — reversal signal suppressed, long continues
-                log.debug("PAPER suppress SHORT reversal — LONG active on %s", asset)
+            if current and current.side != ex_side:
+                self._exit(asset)
+                on_exit(self._risk, current.side)
+            deployed_margin = sum(position.size_usdt / float(asset_risk_params(position.asset)["leverage"] or 1) for position in self._positions.values())
+            self._risk.available_equity = self._risk.current_equity - deployed_margin
+            leverage = float(risk["leverage"] or 1)
+            ok, reason = check_entry(self._risk, ex_side, asset, amount, amount / leverage)
+            if not ok:
+                log.info("PAPER entry blocked %s: %s", asset, reason)
             else:
-                ok, reason = check_entry(self._risk, ex_side, asset, amount)
-                if not ok:
-                    log.info("PAPER entry blocked %s: %s", asset, reason)
-                else:
-                    other_pos = {a: p for a, p in self._positions.items() if a != asset}
-                    deployed = sum(p.size_usdt for p in other_pos.values())
-                    free = self._risk.current_equity - deployed
-                    if amount > free and other_pos:
-                        victim = eviction_priority(other_pos)[0]
-                        log.info("PAPER evict %s (%s) → free capital for %s %s",
-                                 victim, self._positions[victim].side, ex_side, asset)
-                        old_side = self._positions[victim].side
-                        self._exit(victim)
-                        on_exit(self._risk, old_side)
-                    self._enter(asset, ex_side, amount,
-                                stop_loss_pct=risk["stop_loss_pct"] if ex_side == "SHORT" else None,
-                                take_profit_pct=risk["take_profit_pct"] if ex_side == "SHORT" else None)
-                    on_entry(self._risk, ex_side)
+                self._enter(asset, ex_side, amount, stop_loss_pct=risk["stop_loss_pct"], take_profit_pct=risk["take_profit_pct"])
+                on_entry(self._risk, ex_side)
         elif row.get("exit_required") and asset in self._positions:
             old_side = self._positions[asset].side
             self._exit(asset)
@@ -209,7 +204,7 @@ class PaperEngine:
                 if not self._running:
                     break
                 try:
-                    self._on_closed_candle(json.loads(raw))
+                    await asyncio.to_thread(self._on_closed_candle, json.loads(raw))
                 except Exception:
                     log.exception("Paper candle error")
 
@@ -222,6 +217,7 @@ class PaperEngine:
 
     def _warmup(self) -> None:
         from Dataframe.OhlcvCache import fetch_warmup
+
         log.info("Warmup: fetching %d bars for %s interval=%s", self._buffer.capacity, self._assets, self._interval)
         df = fetch_warmup(self._assets, self._interval, self._buffer.capacity)
         for row in df.iter_rows(named=True):

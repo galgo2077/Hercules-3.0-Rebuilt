@@ -7,6 +7,7 @@ import hmac
 import logging
 import os
 import time
+from decimal import ROUND_DOWN, ROUND_HALF_UP, ROUND_UP, Decimal
 from typing import Any
 from urllib.parse import urlencode
 
@@ -16,6 +17,7 @@ log = logging.getLogger(__name__)
 
 _TIMEOUT = 10.0
 _tick_cache: dict[str, float] = {}
+_quantity_cache: dict[str, dict[str, float]] = {}
 
 
 class BinanceClient:
@@ -73,12 +75,29 @@ class BinanceClient:
             _tick_cache[symbol] = float(price_filter["tickSize"])
         return _tick_cache[symbol]
 
-    def round_price(self, symbol: str, price: float) -> float:
+    def quantity_filters(self, symbol: str) -> dict[str, float]:
+        if symbol not in _quantity_cache:
+            info = self._get_public("/fapi/v1/exchangeInfo", symbol=symbol)
+            sym_info = next(s for s in info["symbols"] if s["symbol"] == symbol)
+            filters = {f["filterType"]: f for f in sym_info["filters"]}
+            lot = filters.get("MARKET_LOT_SIZE", filters["LOT_SIZE"])
+            if float(lot.get("stepSize", 0)) <= 0:
+                lot = filters["LOT_SIZE"]
+            notional = filters.get("MIN_NOTIONAL", filters.get("NOTIONAL", {}))
+            _quantity_cache[symbol] = {
+                "step_size": float(lot["stepSize"]),
+                "min_qty": float(lot["minQty"]),
+                "min_notional": float(notional.get("notional", 0)),
+            }
+        return _quantity_cache[symbol]
+
+    def round_price(self, symbol: str, price: float, direction: str = "nearest") -> float:
         """Round price to exchange tickSize for symbol."""
-        tick = self.tick_size(symbol)
-        # number of decimal places = count digits after decimal in tick (e.g. 0.10 → 1)
-        decimals = max(0, -int(f"{tick:.10f}".rstrip("0").find(".")) + len(f"{tick:.10f}".rstrip("0").split(".")[1]))
-        return round(round(price / tick) * tick, decimals)
+        tick = Decimal(str(self.tick_size(symbol)))
+        rounding = {"down": ROUND_DOWN, "nearest": ROUND_HALF_UP, "up": ROUND_UP}.get(direction)
+        if rounding is None:
+            raise ValueError(f"invalid price rounding direction: {direction}")
+        return float((Decimal(str(price)) / tick).to_integral_value(rounding=rounding) * tick)
 
     def ensure_hedge_mode(self) -> None:
         """Enable dual-position (hedge) mode if not already on.

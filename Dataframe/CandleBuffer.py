@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections import deque
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from math import isfinite
 from typing import Any
 
 
@@ -25,15 +26,16 @@ class Candle:
 
 def _parse(asset: str, k: dict[str, Any]) -> Candle:
     """Parse a Binance kline dict (WebSocket or REST) into a Candle."""
-    return Candle(
-        timestamp_ms=int(k.get("t", k.get("timestamp", 0))),
-        open=float(k.get("o", k.get("open", 0))),
-        high=float(k.get("h", k.get("high", 0))),
-        low=float(k.get("l", k.get("low", 0))),
-        close=float(k.get("c", k.get("close", 0))),
-        volume=float(k.get("v", k.get("volume", 0))),
-        asset=asset,
-    )
+    values = [k.get(short, k.get(long)) for short, long in (("t", "timestamp"), ("o", "open"), ("h", "high"), ("l", "low"), ("c", "close"), ("v", "volume"))]
+    if any(value is None for value in values):
+        raise ValueError("kline missing required fields")
+    values = [value for value in values if value is not None]
+    timestamp, open_price, high, low, close, volume = int(values[0]), *(float(value) for value in values[1:])
+    if timestamp < 0 or not all(isfinite(value) for value in (open_price, high, low, close, volume)):
+        raise ValueError("kline contains invalid numeric values")
+    if min(open_price, high, low, close) <= 0 or volume < 0 or high < max(open_price, close) or low > min(open_price, close):
+        raise ValueError("kline contains invalid OHLCV values")
+    return Candle(timestamp_ms=timestamp, open=open_price, high=high, low=low, close=close, volume=volume, asset=asset)
 
 
 class CandleBuffer:
@@ -58,10 +60,9 @@ class CandleBuffer:
             return False
         c = _parse(asset, kline)
         buf = self._ensure(asset)
-        if buf and buf[-1].timestamp_ms == c.timestamp_ms:
-            buf[-1] = c  # dedup same candle
-        else:
-            buf.append(c)
+        if buf and c.timestamp_ms <= buf[-1].timestamp_ms:
+            return False
+        buf.append(c)
         return True
 
     def ingest_ws(self, asset: str, msg: dict[str, Any]) -> bool:

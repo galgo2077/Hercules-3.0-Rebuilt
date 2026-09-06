@@ -22,9 +22,9 @@ import traceback
 
 _TESTNET = "https://testnet.binancefuture.com"
 _SYMBOL = "BTCUSDT"
-_LEVERAGE = 1       # leverage=1 → minimal notional exposure
-_SL_PCT = 0.03      # 3% SL — tight, just enough to clear testnet tick
-_TP_PCT = 0.02      # 2% TP
+_LEVERAGE = 1  # leverage=1 → minimal notional exposure
+_SL_PCT = 0.03  # 3% SL — tight, just enough to clear testnet tick
+_TP_PCT = 0.02  # 2% TP
 
 _pass = 0
 _fail = 0
@@ -43,9 +43,9 @@ def _fail_check(label: str, detail: str = "") -> None:
 
 
 def section(title: str) -> None:
-    print(f"\n{'─'*64}")
+    print(f"\n{'─' * 64}")
     print(f"  {title}")
-    print(f"{'─'*64}")
+    print(f"{'─' * 64}")
 
 
 def _load_demo_creds() -> tuple[str, str, str]:
@@ -132,8 +132,7 @@ def main() -> None:
 
         # Confirm NO stop orders placed for long
         open_orders = client.get("/fapi/v1/openOrders", symbol=_SYMBOL)
-        long_stops = [o for o in open_orders if o.get("positionSide") == "LONG"
-                      and o["type"] in ("STOP_MARKET", "TAKE_PROFIT_MARKET")]
+        long_stops = [o for o in open_orders if o.get("positionSide") == "LONG" and o["type"] in ("STOP_MARKET", "TAKE_PROFIT_MARKET")]
         if not long_stops:
             _ok("Long has zero SL/TP orders (correct)")
         else:
@@ -154,11 +153,15 @@ def main() -> None:
         # (STOP_MARKET, TAKE_PROFIT_MARKET). This is a testnet limitation only —
         # production /fapi/v1/order supports these types. We capture the error and
         # mark as SKIP rather than FAIL on testnet.
-        section(f"5 — Short entry  (SL={_SL_PCT*100:.0f}%  TP={_TP_PCT*100:.0f}%)")
+        section(f"5 — Short entry  (SL={_SL_PCT * 100:.0f}%  TP={_TP_PCT * 100:.0f}%)")
         import httpx as _httpx
+
         try:
             short_resp = Short.enter(
-                client, _SYMBOL, qty * entry_price, _LEVERAGE,
+                client,
+                _SYMBOL,
+                qty * entry_price,
+                _LEVERAGE,
                 stop_loss_pct=_SL_PCT,
                 take_profit_pct=_TP_PCT,
             )

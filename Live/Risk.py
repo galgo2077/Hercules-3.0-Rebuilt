@@ -15,6 +15,7 @@ _KILL = _ROOT / ".hercules" / "kill-switch.json"
 class RiskState:
     initial_equity: float
     current_equity: float
+    available_equity: float | None = None
     max_drawdown_pct: float = 0.20  # halt if equity drops 20% from initial
     open_shorts: int = 0
     max_concurrent_shorts: int = 5
@@ -27,11 +28,15 @@ def _portfolio() -> dict:
         return tomllib.load(f)
 
 
-def kill_active() -> bool:
-    try:
-        return bool(json.loads(_KILL.read_text()).get("active", False))
-    except (FileNotFoundError, json.JSONDecodeError):
+def kill_active(path: Path | None = None) -> bool:
+    path = path or _KILL
+    if not path.exists():
         return False
+    try:
+        state = json.loads(path.read_text())
+        return True if not isinstance(state, dict) else bool(state.get("active", False))
+    except (json.JSONDecodeError, OSError, TypeError):
+        return True
 
 
 def size_trade(
@@ -39,12 +44,14 @@ def size_trade(
     asset: str,
     *,
     portfolio: dict | None = None,
+    risk: dict | None = None,
 ) -> float:
     """Return USDT notional for one trade on `asset`."""
     pf = portfolio or _portfolio()
     weight = float(pf.get("allocation", {}).get(asset, 0.0))
-    trade_pct = float(pf.get("trade_size_pct", 0.30))
-    leverage = float(pf.get("leverage", 1.0))
+    params = risk or pf
+    trade_pct = float(params.get("trade_size_pct", pf.get("trade_size_pct", 0.30)))
+    leverage = float(params.get("leverage", pf.get("leverage", 1.0)))
     return equity_usdt * weight * trade_pct * leverage
 
 
@@ -53,6 +60,7 @@ def check_entry(
     side: str,  # "LONG" | "SHORT"
     asset: str,
     amount_usdt: float,
+    required_margin_usdt: float | None = None,
 ) -> tuple[bool, str]:
     """Return (allowed, reason). Reason empty when allowed."""
     if state.blocked:
@@ -70,6 +78,11 @@ def check_entry(
     if amount_usdt < 1.0:
         return False, f"amount too small: {amount_usdt:.2f} USDT"
 
+    margin = amount_usdt if required_margin_usdt is None else required_margin_usdt
+    available = state.current_equity if state.available_equity is None else state.available_equity
+    if margin > available:
+        return False, f"insufficient available equity: need {margin:.2f}, have {available:.2f} USDT"
+
     if side == "SHORT" and state.open_shorts >= state.max_concurrent_shorts:
         return False, f"max concurrent shorts reached ({state.max_concurrent_shorts})"
 
@@ -86,20 +99,6 @@ def on_exit(state: RiskState, side: str) -> None:
         state.open_shorts -= 1
 
 
-def update_equity(state: RiskState, new_equity: float) -> None:
+def update_equity(state: RiskState, new_equity: float, available_equity: float | None = None) -> None:
     state.current_equity = new_equity
-
-
-def eviction_priority(positions: dict) -> list[str]:
-    """Assets ordered by eviction preference when capital is needed.
-
-    SHORTs evicted first (oldest open_time first within side).
-    LONGs only after all SHORTs exhausted — keep longs alive as long as possible.
-    """
-    def _key(item: tuple) -> tuple:
-        _, pos = item
-        side_rank = 0 if pos.side == "SHORT" else 1
-        age = getattr(pos, "open_time", 0.0)
-        return (side_rank, age)
-
-    return [asset for asset, _ in sorted(positions.items(), key=_key)]
+    state.available_equity = available_equity
