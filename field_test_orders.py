@@ -20,6 +20,10 @@ import sys
 import time
 import traceback
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 _TESTNET = "https://testnet.binancefuture.com"
 _SYMBOL = "BTCUSDT"
 _LEVERAGE = 1  # leverage=1 → minimal notional exposure
