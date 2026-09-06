@@ -19,4 +19,4 @@ uv run python -m Dataframe.Tester
 uv run python -m Strategy.Tester
 ```
 
-Latest results: Python `167 passed`; Rust `14 passed`; Ruff pass; BasedPyright `0 errors`; compile/import pass; clean Python 3.13 install pass. PostgreSQL schema execution was not run locally because neither PostgreSQL nor Docker is installed; schema behavior has static regression coverage.
+Latest results: Python `168 passed`; Rust `14 passed`; Ruff pass; BasedPyright `0 errors`; compile/import pass; clean Python 3.13 install pass. PostgreSQL schema execution was not run locally because neither PostgreSQL nor Docker is installed; schema behavior has static regression coverage.

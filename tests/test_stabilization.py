@@ -155,6 +155,27 @@ def test_worker_modes_are_explicit() -> None:
         _engine_for("live")
 
 
+def test_all_modes_start_and_stop_without_trading(monkeypatch) -> None:
+    from Live.Demo import DemoEngine
+    from Live.Paper import PaperEngine
+    from Live.Real import RealEngine
+
+    engines = [
+        PaperEngine(),
+        DemoEngine(api_key="key", api_secret="secret"),
+        RealEngine(api_key="key", api_secret="secret"),
+    ]
+    for engine in engines:
+        monkeypatch.setattr(engine, "_warmup", lambda: None)
+
+        async def stop_listener(current=engine):
+            current._running = False
+
+        monkeypatch.setattr(engine, "_listen", stop_listener)
+        engine.start()
+        assert engine._running is False
+
+
 def test_lease_acquisition_uses_one_rpc(monkeypatch) -> None:
     from Live.Worker import acquire_lease
 
