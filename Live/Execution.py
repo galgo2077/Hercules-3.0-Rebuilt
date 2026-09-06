@@ -54,12 +54,19 @@ def _position(client: Any, symbol: str, side: str, attempts: int = 1) -> dict[st
 
 
 def _cancel_protection(client: Any, symbol: str, side: str) -> None:
-    orders = client.get("/fapi/v1/openOrders", symbol=symbol)
+    orders = client.protection_orders(symbol) if hasattr(client, "protection_orders") else client.get("/fapi/v1/openOrders", symbol=symbol)
     if not isinstance(orders, list):
         raise RuntimeError("exchange returned invalid open-order state")
     for order in orders:
         if order.get("positionSide") == side:
-            client.delete("/fapi/v1/order", symbol=symbol, orderId=order["orderId"])
+            if hasattr(client, "cancel_protection"):
+                client.cancel_protection(symbol, order["algoId"])
+            else:
+                client.delete("/fapi/v1/order", symbol=symbol, orderId=order["orderId"])
+
+
+def _place_protection(client: Any, **params: Any) -> Any:
+    return client.place_protection(**params) if hasattr(client, "place_protection") else client.post("/fapi/v1/order", **params)
 
 
 def exit_position(client: Any, symbol: str, side: str, quantity: float | None = None) -> dict[str, Any]:
@@ -81,9 +88,12 @@ def exit_position(client: Any, symbol: str, side: str, quantity: float | None = 
         positionSide=side,
         quantity=quantity,
     )
-    _cancel_protection(client, symbol, side)
     if _position(client, symbol, side, attempts=3) is not None:
         raise RuntimeError(f"exchange did not confirm {side} close for {symbol}")
+    try:
+        _cancel_protection(client, symbol, side)
+    except Exception as exc:
+        raise RuntimeError(f"{side} closed but protection cancellation failed for {symbol}: {exc}") from exc
     return result
 
 
@@ -144,8 +154,8 @@ def enter_position(
     try:
         if stop_loss_pct is not None:
             stop = entry_price * (1.0 - stop_loss_pct if side == "LONG" else 1.0 + stop_loss_pct)
-            client.post(
-                "/fapi/v1/order",
+            _place_protection(
+                client,
                 symbol=symbol,
                 side=close_side,
                 type="STOP_MARKET",
@@ -155,8 +165,8 @@ def enter_position(
             )
         if take_profit_pct is not None:
             take = entry_price * (1.0 + take_profit_pct if side == "LONG" else 1.0 - take_profit_pct)
-            client.post(
-                "/fapi/v1/order",
+            _place_protection(
+                client,
                 symbol=symbol,
                 side=close_side,
                 type="TAKE_PROFIT_MARKET",
@@ -165,20 +175,15 @@ def enter_position(
                 closePosition="true",
             )
         expected = {order_type for configured, order_type in ((stop_loss_pct, "STOP_MARKET"), (take_profit_pct, "TAKE_PROFIT_MARKET")) if configured is not None}
-        open_orders = client.get("/fapi/v1/openOrders", symbol=symbol)
-        if not isinstance(open_orders, list) or not expected <= {order.get("type") for order in open_orders if order.get("positionSide") == side}:
+        open_orders = client.protection_orders(symbol) if hasattr(client, "protection_orders") else client.get("/fapi/v1/openOrders", symbol=symbol)
+        if not isinstance(open_orders, list) or not expected <= {order.get("orderType", order.get("type")) for order in open_orders if order.get("positionSide") == side}:
             raise RuntimeError("exchange did not confirm required protection")
     except Exception as protection_error:
-        cancel_error: Exception | None = None
-        try:
-            _cancel_protection(client, symbol, side)
-        except Exception as exc:
-            cancel_error = exc
         try:
             exit_position(client, symbol, side, quantity)
         except Exception as close_error:
+            if _position(client, symbol, side) is None:
+                raise RuntimeError(f"{side} protection failed; position closed but cleanup failed for {symbol}: {close_error}") from protection_error
             raise RuntimeError(f"{side} protection and emergency close failed for {symbol}: {close_error}") from protection_error
-        if cancel_error is not None:
-            raise RuntimeError(f"{side} protection failed; position closed but order cancellation failed for {symbol}: {cancel_error}") from protection_error
         raise RuntimeError(f"{side} protection failed; position closed for {symbol}") from protection_error
     return entry

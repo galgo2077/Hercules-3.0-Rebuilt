@@ -20,6 +20,9 @@ updated: 2026-09-06
 | High/data | LONG/SHORT rows overwrote by symbol | `Positions.py`, `Reconcile.py`, `schema.sql` | simultaneous hedge mapping test |
 | High/security | Corrupt kill JSON enabled trading | `Risk.py`, `Server.py` | text/array/scalar/unreadable tests |
 | High/trading | Protection failure left position open | `Execution.py`, `Orders/Long.py`, `Short.py` | rejected SL/TP emergency-close tests |
+| Critical/trading | Binance moved USD-M conditional exits from normal orders to the algo-order API | `_client.py`, `Execution.py`, `field_test_orders.py` | algo endpoint routing test plus live testnet endpoint probe |
+| High/trading | Successful close could skip flat confirmation when protection cancellation failed | `Execution.py` | cancellation-failure close-state test |
+| Medium/correctness | Global symbol filter cache mixed testnet and real metadata | `_client.py` | per-client filter-cache test |
 | High/trading | Symbol-wide cancel removed opposite hedge protection | `Execution.py` | side-specific order cancellation test |
 | High/numerical | Fixed decimal rounding ignored exchange filters | `_client.py`, `Execution.py` | step/minimum/NaN quantity tests |
 | High/concurrency | Lease used check-then-set | `Worker.py`, `schema.sql` | single atomic RPC test |
@@ -42,3 +45,10 @@ updated: 2026-09-06
 | Low/quality | Lint/type/Rust formatting errors | affected Python/Rust/test files and CI | Ruff pass, BasedPyright 0, cargo fmt/clippy pass |
 
 Original symptom list, root causes, fixes, affected files, and remaining limits are now represented here and in [[Known Risks]].
+
+## Production Supabase probe — 2026-09-06
+
+- Anonymous reads returned zero rows across every user-owned table tested.
+- Two disposable authenticated users passed 18 ownership/isolation checks for accounts, trades, equity snapshots, and positions; both users and all cascading rows were removed.
+- Deployed schema rejects `environment='paper'` and does not expose `acquire_worker_lease`; `Storage/schema.sql` has not been applied to production.
+- The stored account is testnet-only and its AES-GCM ciphertext/nonce/tag structure is valid. No real account is configured.

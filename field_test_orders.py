@@ -54,13 +54,15 @@ def _load_demo_creds() -> tuple[str, str, str]:
     from SharedParams.Supabase import get_service_client
 
     db = get_service_client()
-    rows = db.table("exchange_accounts").select("id,label,environment").execute().data
+    data = db.table("exchange_accounts").select("id,label,environment").execute().data
+    rows = [dict(row) for row in data if isinstance(row, dict)] if isinstance(data, list) else []
     if not rows:
         raise LookupError("No exchange_accounts found in Supabase")
 
-    # Pick the testnet/demo account — prefer environment='testnet', fall back to first
-    demo = next((r for r in rows if r.get("environment") == "testnet"), rows[0])
-    account_id = demo["id"]
+    demo = next((r for r in rows if r.get("environment") == "testnet"), None)
+    if demo is None:
+        raise LookupError("No testnet exchange account found in Supabase")
+    account_id = str(demo["id"])
     label = demo.get("label", account_id)
     print(f"  Using account: {label!r}  id={account_id}  env={demo.get('environment')}")
 
@@ -101,18 +103,19 @@ def main() -> None:
         price_resp = client.get("/fapi/v1/ticker/price", symbol=_SYMBOL)
         entry_price = float(price_resp["price"])
         tick = client.tick_size(_SYMBOL)
-        # Minimum notional on testnet is ~$5; use $6 to stay safely above
-        qty = max(0.001, round(6.0 / entry_price, 3))
+        filters = client.quantity_filters(_SYMBOL)
+        notional = max(filters["min_notional"], filters["min_qty"] * entry_price) + filters["step_size"] * entry_price
         print(f"  {_SYMBOL} price : {entry_price:.2f}")
         print(f"  tickSize       : {tick}")
-        print(f"  order qty      : {qty}  (~${qty * entry_price:.2f} notional)")
+        print(f"  order notional : ${notional:.2f}")
         _ok("Price fetched", f"{entry_price:.2f}")
         _ok("tickSize fetched", str(tick))
 
-        # ── 3. Long entry — no SL, no TP ─────────────────────────────────────
-        section("3 — Long entry (no SL, no TP)")
-        client.set_leverage(_SYMBOL, _LEVERAGE)
-        long_resp = Long.enter(client, _SYMBOL, qty * entry_price, _LEVERAGE)
+        # ── 3. Long entry ─────────────────────────────────────────────────────
+        section("3 — Long entry with SL/TP")
+        long_resp = Long.enter(
+            client, _SYMBOL, notional, _LEVERAGE, stop_loss_pct=_SL_PCT, take_profit_pct=_TP_PCT
+        )
         print(f"  Binance: {long_resp}")
         if long_resp.get("orderId"):
             _ok("Long MARKET placed", f"orderId={long_resp['orderId']}")
@@ -130,13 +133,12 @@ def main() -> None:
         else:
             _fail_check("Long position not visible", f"positionAmt={long_amt}")
 
-        # Confirm NO stop orders placed for long
-        open_orders = client.get("/fapi/v1/openOrders", symbol=_SYMBOL)
-        long_stops = [o for o in open_orders if o.get("positionSide") == "LONG" and o["type"] in ("STOP_MARKET", "TAKE_PROFIT_MARKET")]
-        if not long_stops:
-            _ok("Long has zero SL/TP orders (correct)")
+        open_orders = client.protection_orders(_SYMBOL)
+        long_types = {o.get("orderType") for o in open_orders if o.get("positionSide") == "LONG"}
+        if {"STOP_MARKET", "TAKE_PROFIT_MARKET"} <= long_types:
+            _ok("Long SL/TP confirmed")
         else:
-            _fail_check("Long unexpectedly has SL/TP orders", str([o["type"] for o in long_stops]))
+            _fail_check("Long SL/TP missing", str(sorted(long_types)))
 
         # ── 4. Close Long ─────────────────────────────────────────────────────
         section("4 — Close Long")
@@ -149,25 +151,15 @@ def main() -> None:
         time.sleep(1.0)
 
         # ── 5. Short entry — with SL + TP ────────────────────────────────────
-        # NOTE: Binance testnet returns -4120 for all conditional order types
-        # (STOP_MARKET, TAKE_PROFIT_MARKET). This is a testnet limitation only —
-        # production /fapi/v1/order supports these types. We capture the error and
-        # mark as SKIP rather than FAIL on testnet.
         section(f"5 — Short entry  (SL={_SL_PCT * 100:.0f}%  TP={_TP_PCT * 100:.0f}%)")
-        import httpx as _httpx
-
-        try:
-            short_resp = Short.enter(
-                client,
-                _SYMBOL,
-                qty * entry_price,
-                _LEVERAGE,
-                stop_loss_pct=_SL_PCT,
-                take_profit_pct=_TP_PCT,
-            )
-        except _httpx.HTTPStatusError as e:
-            short_resp = {}
-            _fail_check("Short enter raised", str(e))
+        short_resp = Short.enter(
+            client,
+            _SYMBOL,
+            notional,
+            _LEVERAGE,
+            stop_loss_pct=_SL_PCT,
+            take_profit_pct=_TP_PCT,
+        )
 
         print(f"  Binance entry: {short_resp}")
         if short_resp.get("orderId"):
@@ -186,38 +178,34 @@ def main() -> None:
         else:
             _fail_check("Short position not visible", f"positionAmt={short_amt}")
 
-        # Confirm SL and TP orders — testnet blocks conditional orders (-4120)
-        open_orders2 = client.get("/fapi/v1/openOrders", symbol=_SYMBOL)
+        # Confirm SL and TP algo orders.
+        open_orders2 = client.protection_orders(_SYMBOL)
         short_open = [o for o in open_orders2 if o.get("positionSide") == "SHORT"]
-        types_found = [o["type"] for o in short_open]
+        types_found = [o["orderType"] for o in short_open]
         print(f"  Open orders (SHORT side): {types_found}")
 
-        sl_orders = [o for o in short_open if o["type"] == "STOP_MARKET"]
-        tp_orders = [o for o in short_open if o["type"] == "TAKE_PROFIT_MARKET"]
+        sl_orders = [o for o in short_open if o["orderType"] == "STOP_MARKET"]
+        tp_orders = [o for o in short_open if o["orderType"] == "TAKE_PROFIT_MARKET"]
 
         if sl_orders:
-            sl_price = float(sl_orders[0]["stopPrice"])
+            sl_price = float(sl_orders[0]["triggerPrice"])
             _ok("STOP_MARKET (SL) present", f"stopPrice={sl_price:.4f}")
             if sl_price > entry_price:
                 _ok("SL above entry (correct for short)")
             else:
                 _fail_check("SL NOT above entry", f"sl={sl_price:.4f}  entry={entry_price:.4f}")
         else:
-            # -4120 on testnet: conditional orders not supported — not a code bug
-            global _pass
-            _pass += 1
-            print("  [SKIP]  STOP_MARKET (SL) — testnet blocks conditional orders (-4120); production supported")
+            _fail_check("STOP_MARKET (SL) missing")
 
         if tp_orders:
-            tp_price = float(tp_orders[0]["stopPrice"])
+            tp_price = float(tp_orders[0]["triggerPrice"])
             _ok("TAKE_PROFIT_MARKET (TP) present", f"stopPrice={tp_price:.4f}")
             if tp_price < entry_price:
                 _ok("TP below entry (correct for short)")
             else:
                 _fail_check("TP NOT below entry", f"tp={tp_price:.4f}  entry={entry_price:.4f}")
         else:
-            _pass += 1
-            print("  [SKIP]  TAKE_PROFIT_MARKET (TP) — testnet blocks conditional orders (-4120); production supported")
+            _fail_check("TAKE_PROFIT_MARKET (TP) missing")
 
         # ── 6. Cleanup ────────────────────────────────────────────────────────
         section("6 — Cleanup")

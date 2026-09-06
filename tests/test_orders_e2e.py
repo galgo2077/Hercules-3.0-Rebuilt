@@ -14,6 +14,7 @@ class FakeClient:
         entry_price: float | None = None,
         hide_positions: bool = False,
         hide_open_orders: bool = False,
+        reject_cancel: bool = False,
     ) -> None:
         self.price = price
         self.entry_price = price if entry_price is None else entry_price
@@ -21,6 +22,7 @@ class FakeClient:
         self.reject_type = reject_type
         self.hide_positions = hide_positions
         self.hide_open_orders = hide_open_orders
+        self.reject_cancel = reject_cancel
         self.calls: list[tuple] = []
         self.positions: dict[tuple[str, str], float] = {}
         self.open_orders: list[dict] = []
@@ -75,6 +77,8 @@ class FakeClient:
 
     def delete(self, path: str, **kwargs):
         self.calls.append(("DELETE", path, kwargs))
+        if self.reject_cancel:
+            raise RuntimeError("cancel rejected")
         self.open_orders = [order for order in self.open_orders if order.get("orderId") != kwargs.get("orderId")]
         return {"code": 200}
 
@@ -155,6 +159,17 @@ def test_exit_cancels_only_matching_hedge_side_protection() -> None:
     assert client.open_orders == [{"orderId": 2, "positionSide": "SHORT"}]
 
 
+def test_exit_confirms_close_before_reporting_cancellation_failure() -> None:
+    from Live.Orders import Long
+
+    client = FakeClient(reject_cancel=True)
+    client.positions[("BTCUSDT", "LONG")] = 0.1
+    client.open_orders = [{"orderId": 1, "positionSide": "LONG"}]
+    with pytest.raises(RuntimeError, match="closed but protection cancellation failed"):
+        Long.exit(client, "BTCUSDT")
+    assert client.positions[("BTCUSDT", "LONG")] == 0
+
+
 @pytest.mark.parametrize("quantity", [0, -1, float("nan"), float("inf")])
 def test_invalid_quantities_are_rejected(quantity: float) -> None:
     from Live.Execution import quantize_quantity
@@ -229,3 +244,53 @@ def test_step_size_rounds_down_and_enforces_minimum() -> None:
     assert order_quantity(client, "BTCUSDT", 5.01, 3.0) == 1.67
     with pytest.raises(ValueError, match="below exchange minimum"):
         order_quantity(client, "BTCUSDT", 4.99, 3.0)
+
+
+def test_binance_client_routes_protection_to_algo_api(monkeypatch) -> None:
+    from Live._client import BinanceClient
+
+    client = BinanceClient("https://example.invalid", api_key="key", api_secret="secret")
+    calls = []
+    monkeypatch.setattr(client, "post", lambda path, **params: calls.append((path, params)) or {"algoId": 1})
+    client.place_protection(symbol="BTCUSDT", type="STOP_MARKET", stopPrice=90, positionSide="LONG", side="SELL", closePosition="true")
+    assert calls == [
+        (
+            "/fapi/v1/algoOrder",
+            {
+                "symbol": "BTCUSDT",
+                "type": "STOP_MARKET",
+                "positionSide": "LONG",
+                "side": "SELL",
+                "closePosition": "true",
+                "algoType": "CONDITIONAL",
+                "triggerPrice": 90,
+            },
+        )
+    ]
+    client.close()
+
+
+def test_binance_filter_cache_is_per_exchange_client(monkeypatch) -> None:
+    from Live._client import BinanceClient
+
+    def exchange_info(step: str) -> dict:
+        return {
+            "symbols": [
+                {
+                    "symbol": "BTCUSDT",
+                    "filters": [
+                        {"filterType": "LOT_SIZE", "stepSize": step, "minQty": step},
+                        {"filterType": "MIN_NOTIONAL", "notional": "5"},
+                    ],
+                }
+            ]
+        }
+
+    testnet = BinanceClient("https://testnet.invalid", api_key="key", api_secret="secret")
+    real = BinanceClient("https://real.invalid", api_key="key", api_secret="secret")
+    monkeypatch.setattr(testnet, "_get_public", lambda *_args, **_kwargs: exchange_info("0.001"))
+    monkeypatch.setattr(real, "_get_public", lambda *_args, **_kwargs: exchange_info("0.01"))
+    assert testnet.quantity_filters("BTCUSDT")["step_size"] == 0.001
+    assert real.quantity_filters("BTCUSDT")["step_size"] == 0.01
+    testnet.close()
+    real.close()
