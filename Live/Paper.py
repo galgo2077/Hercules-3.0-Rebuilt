@@ -66,6 +66,8 @@ class PaperEngine:
         self._trades: list[PaperTrade] = []
         self._running = False
         self._account_id = account_id
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._websocket: Any = None
         with (_ROOT / "SharedData" / "Backtest.toml").open("rb") as handle:
             cash = float(tomllib.load(handle)["capital"]["initial_cash"])
         self._risk = RiskState(
@@ -221,14 +223,19 @@ class PaperEngine:
             on_exit(self._risk, old_side)
 
     async def _listen(self) -> None:
+        self._loop = asyncio.get_running_loop()
         async with websockets.connect(self._stream_url()) as ws:
-            async for raw in ws:
-                if not self._running:
-                    break
-                try:
-                    await asyncio.to_thread(self._on_closed_candle, json.loads(raw))
-                except Exception:
-                    log.exception("Paper candle error")
+            self._websocket = ws
+            try:
+                async for raw in ws:
+                    if not self._running:
+                        break
+                    try:
+                        await asyncio.to_thread(self._on_closed_candle, json.loads(raw))
+                    except Exception:
+                        log.exception("Paper candle error")
+            finally:
+                self._websocket = None
 
     def start(self) -> None:
         self._running = True
@@ -236,6 +243,8 @@ class PaperEngine:
 
     def stop(self) -> None:
         self._running = False
+        if self._loop is not None and self._websocket is not None:
+            asyncio.run_coroutine_threadsafe(self._websocket.close(), self._loop)
 
     def _warmup(self) -> None:
         from Dataframe.OhlcvCache import fetch_warmup

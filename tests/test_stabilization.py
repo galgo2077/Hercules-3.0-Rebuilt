@@ -273,6 +273,8 @@ def test_live_refresh_persists_both_hedge_sides(monkeypatch) -> None:
 def test_schema_has_atomic_lease_rls_and_rerunnable_policies() -> None:
     schema = (Path(__file__).resolve().parents[1] / "Storage" / "schema.sql").read_text(encoding="utf-8")
     assert "PRIMARY KEY (account_id, asset, side)" in schema
+    assert "enabled     BOOLEAN NOT NULL DEFAULT TRUE" in schema
+    assert "ADD COLUMN IF NOT EXISTS enabled" in schema
     assert "CREATE OR REPLACE FUNCTION acquire_worker_lease" in schema
     assert "p_ttl_seconds IS NULL OR p_ttl_seconds <= 0" in schema
     assert "worker_leases.expires_at <= now() OR worker_leases.worker_id = EXCLUDED.worker_id" in schema

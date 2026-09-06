@@ -69,7 +69,7 @@ def _build_app() -> FastAPI:
         CORSMiddleware,
         allow_origins=sec.get("allowed_origins", []),
         allow_credentials=True,
-        allow_methods=["GET", "POST", "DELETE"],
+        allow_methods=["GET", "POST", "PATCH", "DELETE"],
         allow_headers=["Authorization", "Content-Type"],
     )
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=sec.get("allowed_hosts", ["*"]))

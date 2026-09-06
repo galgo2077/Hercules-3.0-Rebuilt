@@ -24,11 +24,15 @@ class AddAccountRequest(BaseModel):
     environment: Literal["paper", "testnet", "real"] = "testnet"
 
 
+class UpdateAccountRequest(BaseModel):
+    enabled: bool
+
+
 @router.get("")
 def list_accounts(user: _User) -> list[dict]:
     from SharedParams.Supabase import get_service_client
 
-    resp = get_service_client().table("exchange_accounts").select("id,label,environment,created_at").eq("user_id", user.id).order("created_at", desc=True).execute()
+    resp = get_service_client().table("exchange_accounts").select("id,label,environment,enabled,created_at").eq("user_id", user.id).order("created_at", desc=True).execute()
     return _records(resp.data)
 
 
@@ -64,6 +68,17 @@ def add_account(body: AddAccountRequest, user: _User) -> dict:
     rows = _records(resp.data)
     if not rows:
         raise HTTPException(status_code=500, detail="insert failed")
+    return rows[0]
+
+
+@router.patch("/{account_id}")
+def update_account(account_id: str, body: UpdateAccountRequest, user: _User) -> dict:
+    from SharedParams.Supabase import get_service_client
+
+    resp = get_service_client().table("exchange_accounts").update({"enabled": body.enabled}).eq("id", account_id).eq("user_id", user.id).execute()
+    rows = _records(resp.data)
+    if not rows:
+        raise HTTPException(status_code=404, detail="not found")
     return rows[0]
 
 

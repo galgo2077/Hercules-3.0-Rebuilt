@@ -21,6 +21,7 @@ class _FakeQuery:
         self._filtered = filtered
         self._filters = []
         self._delete = False
+        self._update = None
 
     def select(self, *a, **kw):
         return self
@@ -39,6 +40,10 @@ class _FakeQuery:
         self._delete = True
         return self
 
+    def update(self, values):
+        self._update = values
+        return self
+
     def execute(self):
         rows = self._data
         if self._filtered:
@@ -46,6 +51,9 @@ class _FakeQuery:
         if self._delete:
             for row in rows:
                 self._data.remove(row)
+        elif self._update is not None:
+            for row in rows:
+                row.update(self._update)
         return _FakeResp(rows)
 
 
@@ -176,6 +184,24 @@ def test_cross_origin_mutation_is_rejected(client_admin):
     client, _ = client_admin
     response = client.post("/api/kill/activate", headers={"Origin": "https://evil.example"})
     assert response.status_code == 403
+
+
+def test_account_enable_toggle_respects_ownership(client_user, monkeypatch):
+    database = FakeSupabase(
+        {
+            "exchange_accounts": [
+                {"id": "a1", "user_id": "u1", "enabled": True},
+                {"id": "a2", "user_id": "u2", "enabled": True},
+            ]
+        }
+    )
+    monkeypatch.setattr("SharedParams.Supabase.get_service_client", lambda: database)
+
+    response = client_user.patch("/api/accounts/a1", json={"enabled": False})
+    assert response.status_code == 200
+    assert response.json()["enabled"] is False
+    assert client_user.patch("/api/accounts/a2", json={"enabled": False}).status_code == 404
+    assert database._tables["exchange_accounts"][1]["enabled"] is True
 
 
 # ── Trades ────────────────────────────────────────────────────────────────────

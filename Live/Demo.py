@@ -71,6 +71,8 @@ class DemoEngine:
         self._buffer = CandleBuffer(capacity=600)
         self._running = False
         self._tasks: set[asyncio.Task[None]] = set()
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._websocket: Any = None
         # per-asset lock: prevents concurrent mutations of shared state per asset
         self._asset_locks: dict[str, asyncio.Lock] = {a: asyncio.Lock() for a in self._assets}
         cash = float(self._pf.get("initial_cash", 100.0))
@@ -213,18 +215,23 @@ class DemoEngine:
 
     async def _listen(self) -> None:
         url = _stream_url(self._assets, self._interval).replace(_DEMO_WS, self._ws_url, 1)
+        self._loop = asyncio.get_running_loop()
         with self._client() as client:
             client.ensure_hedge_mode()  # must run before any order; raises if it fails
             self._refresh(client)
             try:
                 async with websockets.connect(url) as ws:
-                    async for raw in ws:
-                        if not self._running:
-                            break
-                        try:
-                            self._dispatch_candle(client, json.loads(raw))
-                        except Exception:
-                            log.exception("[%s] candle dispatch error", self._label)
+                    self._websocket = ws
+                    try:
+                        async for raw in ws:
+                            if not self._running:
+                                break
+                            try:
+                                self._dispatch_candle(client, json.loads(raw))
+                            except Exception:
+                                log.exception("[%s] candle dispatch error", self._label)
+                    finally:
+                        self._websocket = None
             finally:
                 if self._tasks:
                     await asyncio.gather(*self._tasks, return_exceptions=True)
@@ -235,6 +242,8 @@ class DemoEngine:
 
     def stop(self) -> None:
         self._running = False
+        if self._loop is not None and self._websocket is not None:
+            asyncio.run_coroutine_threadsafe(self._websocket.close(), self._loop)
 
     def _warmup(self) -> None:
         from Dataframe.OhlcvCache import fetch_warmup

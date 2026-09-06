@@ -60,5 +60,11 @@ def test_schema_reruns_and_lease_acquisition_is_atomic() -> None:
         with ThreadPoolExecutor(max_workers=2) as pool:
             results = list(pool.map(acquire, ("worker-a", "worker-b")))
         assert sorted(results) == ["f", "t"]
+        owner = _psql(container, "SELECT worker_id FROM worker_leases")
+        standby = "worker-b" if owner == "worker-a" else "worker-a"
+        assert acquire(owner) == "t"
+        assert acquire(standby) == "f"
+        _psql(container, "UPDATE worker_leases SET expires_at = now() - interval '1 second'")
+        assert acquire(standby) == "t"
     finally:
         subprocess.run([_PODMAN, "stop", "-t", "0", container], check=False, capture_output=True)  # noqa: S603 - fixed test command
