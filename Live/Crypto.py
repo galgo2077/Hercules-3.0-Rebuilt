@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import base64
+import binascii
 import os
 from typing import cast
 
+from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 _KEY_LEN = 32  # 256-bit
@@ -14,7 +16,10 @@ _NONCE_LEN = 12  # 96-bit GCM nonce
 
 def _master_key() -> bytes:
     raw = os.environ["HERCULES_MASTER_KEY"]
-    key = base64.b64decode(raw)
+    try:
+        key = base64.b64decode(raw, validate=True)
+    except binascii.Error as exc:
+        raise ValueError("HERCULES_MASTER_KEY must be valid base64") from exc
     if len(key) != _KEY_LEN:
         raise ValueError(f"HERCULES_MASTER_KEY must be 32 bytes (got {len(key)})")
     return key
@@ -39,9 +44,19 @@ def encrypt(plaintext: str) -> dict[str, str]:
 
 def decrypt(ciphertext: str, nonce: str, tag: str) -> str:
     """Decrypt AES-256-GCM ciphertext. Returns plaintext string."""
-    ct = base64.b64decode(ciphertext) + base64.b64decode(tag)
-    n = base64.b64decode(nonce)
-    return AESGCM(_master_key()).decrypt(n, ct, None).decode()
+    try:
+        ct = base64.b64decode(ciphertext, validate=True) + base64.b64decode(tag, validate=True)
+        n = base64.b64decode(nonce, validate=True)
+        return AESGCM(_master_key()).decrypt(n, ct, None).decode()
+    except (binascii.Error, InvalidTag, UnicodeDecodeError, ValueError) as exc:
+        raise ValueError("invalid encrypted credential") from exc
+
+
+def _split_meta(value: str) -> tuple[str, str]:
+    parts = value.split(":")
+    if len(parts) != 2 or not all(parts):
+        raise ValueError("exchange account has invalid credential metadata")
+    return parts[0], parts[1]
 
 
 def store_credential(account_id: str, api_key: str, api_secret: str) -> None:
@@ -78,8 +93,8 @@ def load_credential(account_id: str) -> tuple[str, str]:
     secret_meta = cast(str, secret_meta)
     api_key_value = cast(str, api_key_value)
     api_secret_value = cast(str, api_secret_value)
-    key_nonce, key_tag = key_meta.split(":")
-    sec_nonce, sec_tag = secret_meta.split(":")
+    key_nonce, key_tag = _split_meta(key_meta)
+    sec_nonce, sec_tag = _split_meta(secret_meta)
     api_key = decrypt(api_key_value, key_nonce, key_tag)
     api_secret = decrypt(api_secret_value, sec_nonce, sec_tag)
     return api_key, api_secret

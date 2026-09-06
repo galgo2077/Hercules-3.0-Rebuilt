@@ -24,25 +24,9 @@ button:hover{background:#333}
   <input id="email" type="email" autocomplete="username">
   <label>PASSWORD</label>
   <input id="pass" type="password" autocomplete="current-password">
-  <button onclick="login()">LOGIN</button>
+  <button id="login">LOGIN</button>
   <div id="err"></div>
 </div>
-<script>
-async function login(){
-  const email=document.getElementById('email').value;
-  const pass=document.getElementById('pass').value;
-  const err=document.getElementById('err');
-  err.style.display='none';
-  try{
-    const r=await fetch('/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password:pass})});
-    if(!r.ok){const d=await r.json();throw new Error(d.detail||'login failed');}
-    const d=await r.json();
-    localStorage.setItem('access_token',d.access_token);
-    localStorage.setItem('refresh_token',d.refresh_token);
-    window.location='/';
-  }catch(e){err.textContent=e.message;err.style.display='block';}
-}
-document.addEventListener('keydown',e=>{if(e.key==='Enter')login();});
-</script>
+<script src="/login.js"></script>
 </body>
 </html>

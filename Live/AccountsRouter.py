@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from Live.Auth import AuthUser, require_auth
 
@@ -18,14 +18,14 @@ def _records(data: object) -> list[dict]:
 
 
 class AddAccountRequest(BaseModel):
-    label: str
-    api_key: str
-    api_secret: str
-    environment: str = "testnet"  # testnet | real
+    label: str = Field(min_length=1, max_length=100)
+    api_key: str = Field(default="", max_length=500)
+    api_secret: str = Field(default="", max_length=500)
+    environment: Literal["paper", "testnet", "real"] = "testnet"
 
 
 @router.get("")
-async def list_accounts(user: _User) -> list[dict]:
+def list_accounts(user: _User) -> list[dict]:
     from SharedParams.Supabase import get_service_client
 
     resp = get_service_client().table("exchange_accounts").select("id,label,environment,created_at").eq("user_id", user.id).order("created_at", desc=True).execute()
@@ -33,12 +33,17 @@ async def list_accounts(user: _User) -> list[dict]:
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
-async def add_account(body: AddAccountRequest, user: _User) -> dict:
+def add_account(body: AddAccountRequest, user: _User) -> dict:
     from Live.Crypto import encrypt
     from SharedParams.Supabase import get_service_client
 
-    enc_key = encrypt(body.api_key)
-    enc_sec = encrypt(body.api_secret)
+    if body.environment != "paper" and (not body.api_key or not body.api_secret):
+        raise HTTPException(status_code=400, detail="API credentials are required for exchange accounts")
+    if body.environment == "paper":
+        enc_key = enc_sec = {"ciphertext": "", "nonce": "", "tag": ""}
+    else:
+        enc_key = encrypt(body.api_key)
+        enc_sec = encrypt(body.api_secret)
 
     resp = (
         get_service_client()
@@ -63,10 +68,10 @@ async def add_account(body: AddAccountRequest, user: _User) -> dict:
 
 
 @router.delete("/{account_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_account(account_id: str, user: _User) -> None:
+def delete_account(account_id: str, user: _User) -> None:
     from SharedParams.Supabase import get_service_client
 
     existing = get_service_client().table("exchange_accounts").select("id").eq("id", account_id).eq("user_id", user.id).execute()
     if not existing.data:
         raise HTTPException(status_code=404, detail="not found")
-    get_service_client().table("exchange_accounts").delete().eq("id", account_id).execute()
+    get_service_client().table("exchange_accounts").delete().eq("id", account_id).eq("user_id", user.id).execute()

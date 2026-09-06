@@ -4,11 +4,10 @@ import base64
 import os
 
 import pytest
-from cryptography.exceptions import InvalidTag
 
 os.environ.setdefault("HERCULES_MASTER_KEY", base64.b64encode(os.urandom(32)).decode())
 
-from Live.Crypto import decrypt, encrypt, generate_key
+from Live.Crypto import _split_meta, decrypt, encrypt, generate_key
 
 
 def test_roundtrip():
@@ -25,14 +24,14 @@ def test_generate_key_length():
 def test_tampered_ciphertext_rejected():
     blob = encrypt("hello")
     bad = base64.b64encode(b"\x00" * 16).decode()
-    with pytest.raises(InvalidTag):
+    with pytest.raises(ValueError, match="invalid encrypted credential"):
         decrypt(bad, blob["nonce"], blob["tag"])
 
 
 def test_tampered_tag_rejected():
     blob = encrypt("hello")
     bad_tag = base64.b64encode(b"\xff" * 16).decode()
-    with pytest.raises(InvalidTag):
+    with pytest.raises(ValueError, match="invalid encrypted credential"):
         decrypt(blob["ciphertext"], blob["nonce"], bad_tag)
 
 
@@ -41,3 +40,9 @@ def test_different_encryptions_differ():
     b = encrypt("same")
     assert a["nonce"] != b["nonce"]
     assert a["ciphertext"] != b["ciphertext"]
+
+
+@pytest.mark.parametrize("metadata", ["", "missing-separator", "too:many:parts", ":missing", "missing:"])
+def test_invalid_credential_metadata_is_rejected(metadata):
+    with pytest.raises(ValueError, match="credential metadata"):
+        _split_meta(metadata)

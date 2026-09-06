@@ -5,7 +5,7 @@ Run once before any live/field-test execution:
     source .venv/bin/activate
     export SUPABASE_URL=...
     export SUPABASE_SERVICE_ROLE_KEY=...
-    export HERCULES_MASTER_KEY=...    # D28DFBj7K4FjkfFj4bP/3JXSGTKbHDWrpOFbpVbw1ZA=
+    export HERCULES_MASTER_KEY=...    # generate with Live.Crypto.generate_key()
     python setup_demo_account.py
 
 Creates (or updates) rows in exchange_accounts for environment='testnet' and environment='real'.
@@ -93,9 +93,7 @@ def _upsert_account(user_id: str, label: str, environment: str, api_key: str, ap
 
     if rows:
         account_id = rows[0]["id"]
-        db.table("exchange_accounts").update({
-            k: v for k, v in payload.items() if k not in ("user_id", "label", "environment")
-        }).eq("id", account_id).execute()
+        db.table("exchange_accounts").update({k: v for k, v in payload.items() if k not in ("user_id", "label", "environment")}).eq("id", account_id).execute()
         print(f"  Updated {environment} ({label})  id={account_id}")
     else:
         result = db.table("exchange_accounts").insert(payload).execute()
@@ -141,6 +139,7 @@ def main() -> None:
     print("\n── Verify decrypt")
     try:
         from Live.Crypto import load_credential
+
         k, s = load_credential(testnet_id)
         if k == testnet_key and s == testnet_secret:
             print("  [PASS] Testnet decrypt round-trip correct")
@@ -149,6 +148,7 @@ def main() -> None:
             sys.exit(1)
         if real_id:
             from Live.Crypto import load_credential as lc
+
             rk, rs = lc(real_id)
             if rk == real_key and rs == real_secret:
                 print("  [PASS] Real decrypt round-trip correct")

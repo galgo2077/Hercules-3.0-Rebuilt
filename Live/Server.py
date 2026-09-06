@@ -3,18 +3,21 @@
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 import tomllib
 from pathlib import Path
 from typing import Annotated, Any
 
 import uvicorn
-from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from Live.Auth import AuthUser, require_auth
+from Live.Risk import kill_active
 from SharedParams.Config import HerculesConfig
 
 _ROOT = Path(__file__).resolve().parents[1]
@@ -39,6 +42,26 @@ def _security_cfg() -> dict:
         return tomllib.load(f)
 
 
+def _write_kill(active: bool, user_id: str | None = None) -> None:
+    _KILL_SWITCH.parent.mkdir(parents=True, exist_ok=True)
+    payload: dict[str, Any] = {"active": active}
+    if user_id:
+        payload["by"] = user_id
+    fd, temp_name = tempfile.mkstemp(dir=_KILL_SWITCH.parent, prefix="kill-", text=True)
+    try:
+        with os.fdopen(fd, "w") as handle:
+            json.dump(payload, handle)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp_name, _KILL_SWITCH)
+    except Exception:
+        try:
+            os.unlink(temp_name)
+        except OSError:
+            pass
+        raise
+
+
 def _build_app() -> FastAPI:
     sec = _security_cfg()
     app = FastAPI(title="Hercules", docs_url=None, redoc_url=None)
@@ -46,10 +69,21 @@ def _build_app() -> FastAPI:
         CORSMiddleware,
         allow_origins=sec.get("allowed_origins", []),
         allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
+        allow_methods=["GET", "POST", "DELETE"],
+        allow_headers=["Authorization", "Content-Type"],
     )
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=sec.get("allowed_hosts", ["*"]))
+
+    @app.middleware("http")
+    async def security_headers(request: Request, call_next):  # noqa: ANN001
+        origin = request.headers.get("origin")
+        if request.method in {"POST", "PUT", "PATCH", "DELETE"} and origin and origin not in sec.get("allowed_origins", []):
+            return Response(status_code=status.HTTP_403_FORBIDDEN, content="cross-origin mutation denied")
+        response = await call_next(request)
+        response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["Referrer-Policy"] = "no-referrer"
+        return response
 
     from Live.AccountsRouter import router as accounts_router
     from Live.AuthRouter import router as auth_router
@@ -75,13 +109,13 @@ _User = Annotated[AuthUser, Depends(require_auth)]
 
 
 @app.get("/api/status")
-async def status_endpoint(user: _User) -> dict[str, Any]:
-    kill = _KILL_SWITCH.exists() and json.loads(_KILL_SWITCH.read_text()).get("active", False)
+def status_endpoint(user: _User) -> dict[str, Any]:
+    kill = kill_active(_KILL_SWITCH)
     return {"ok": True, "kill_switch": kill, "user": user.id}
 
 
 @app.get("/api/config")
-async def get_config(user: _User) -> dict[str, Any]:
+def get_config(user: _User) -> dict[str, Any]:
     from SharedParams.Config import load
 
     cfg = load()
@@ -93,17 +127,19 @@ async def get_config(user: _User) -> dict[str, Any]:
 
 
 @app.get("/api/dashboard")
-async def get_dashboard(user: _User, account: str | None = None) -> dict[str, Any]:
+def get_dashboard(user: _User, account: str | None = None) -> dict[str, Any]:
     """Return the monitor's read-only, user-scoped aggregate data."""
     from Live.DashboardData import build_dashboard
     from SharedParams.Config import load
 
+    if account is not None and account not in _owned_account_ids(user.id):
+        raise HTTPException(status_code=404, detail="account not found")
     cfg = load()
     return build_dashboard(user.id, cfg.portfolio.leverage, cfg.backtest.assets, account)
 
 
 @app.get("/api/databases")
-async def list_databases(user: _User) -> list[dict[str, Any]]:
+def list_databases(user: _User) -> list[dict[str, Any]]:
     """Compatibility endpoint: expose user accounts as selectable databases."""
     from SharedParams.Supabase import get_service_client
 
@@ -112,7 +148,7 @@ async def list_databases(user: _User) -> list[dict[str, Any]]:
 
 
 @app.get("/api/assets")
-async def list_assets(user: _User) -> list[str]:
+def list_assets(user: _User) -> list[str]:
     """Return configured and observed assets for the authenticated user."""
     from SharedParams.Config import load
     from SharedParams.Supabase import get_service_client
@@ -128,17 +164,19 @@ async def list_assets(user: _User) -> list[str]:
 
 
 @app.get("/api/stats")
-async def get_stats(user: _User, account: str | None = None) -> dict[str, Any]:
+def get_stats(user: _User, account: str | None = None) -> dict[str, Any]:
     """Compatibility endpoint exposing the monitor statistics object."""
     from Live.DashboardData import build_dashboard
     from SharedParams.Config import load
 
+    if account is not None and account not in _owned_account_ids(user.id):
+        raise HTTPException(status_code=404, detail="account not found")
     cfg = load()
     return build_dashboard(user.id, cfg.portfolio.leverage, cfg.backtest.assets, account)["stats"]
 
 
 @app.get("/accounts", include_in_schema=False)
-async def accounts_page() -> FileResponse:
+def accounts_page() -> FileResponse:
     """Serve account selector page before SPA fallback can shadow the route."""
     page = _STATIC / "accounts.html"
     if not page.exists():
@@ -146,29 +184,45 @@ async def accounts_page() -> FileResponse:
     return FileResponse(page)
 
 
+@app.get("/vendor/plotly.min.js", include_in_schema=False)
+def plotly_javascript() -> FileResponse:
+    import plotly
+
+    source = Path(plotly.__file__).parent / "package_data" / "plotly.min.js"
+    return FileResponse(source, media_type="application/javascript")
+
+
 # ── Trades ────────────────────────────────────────────────────────────────────
 
 
 @app.get("/api/trades")
-async def list_trades(user: _User, limit: int = 50) -> list[dict]:
+def list_trades(user: _User, limit: int = 50) -> list[dict]:
     from SharedParams.Supabase import get_service_client
 
+    if not 1 <= limit <= 500:
+        raise HTTPException(status_code=400, detail="limit must be between 1 and 500")
     client = get_service_client()
     return [trade for account_id in _owned_account_ids(user.id) for trade in _records(client.table("trades").select("*").eq("account_id", account_id).order("entry_time", desc=True).limit(limit).execute())][:limit]
 
 
 @app.delete("/api/trades/{trade_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_trade(trade_id: int, user: _User) -> None:
+def delete_trade(trade_id: int, user: _User) -> None:
     from SharedParams.Supabase import get_service_client
 
-    get_service_client().table("trades").delete().eq("id", trade_id).execute()
+    client = get_service_client()
+    owned = set(_owned_account_ids(user.id))
+    response = client.table("trades").select("id,account_id").eq("id", trade_id).execute()
+    rows = _records(response.data)
+    if not rows or str(rows[0].get("account_id")) not in owned:
+        raise HTTPException(status_code=404, detail="trade not found")
+    client.table("trades").delete().eq("id", trade_id).eq("account_id", rows[0]["account_id"]).execute()
 
 
 # ── Positions ─────────────────────────────────────────────────────────────────
 
 
 @app.get("/api/positions")
-async def get_positions(user: _User) -> list[dict]:
+def get_positions(user: _User) -> list[dict]:
     from SharedParams.Supabase import get_service_client
 
     client = get_service_client()
@@ -179,9 +233,11 @@ async def get_positions(user: _User) -> list[dict]:
 
 
 @app.get("/api/equity")
-async def get_equity(user: _User, limit: int = 200) -> list[dict]:
+def get_equity(user: _User, limit: int = 200) -> list[dict]:
     from SharedParams.Supabase import get_service_client
 
+    if not 1 <= limit <= 500:
+        raise HTTPException(status_code=400, detail="limit must be between 1 and 500")
     client = get_service_client()
     rows = [point for account_id in _owned_account_ids(user.id) for point in _records(client.table("equity_snapshots").select("*").eq("account_id", account_id).order("ts", desc=True).limit(limit).execute())]
     return list(reversed(rows[:limit]))
@@ -191,41 +247,48 @@ async def get_equity(user: _User, limit: int = 200) -> list[dict]:
 
 
 @app.get("/api/candles")
-async def get_candles(user: _User, asset: str = "BTCUSDT", limit: int = 200) -> list[dict]:
+def get_candles(user: _User, asset: str = "BTCUSDT", limit: int = 200, interval: str = "1h") -> list[dict]:
     from datetime import datetime, timedelta, timezone
 
-    from Dataframe.Binance import fetch_historical
+    from Dataframe.Binance import INTERVAL_MS, fetch_historical
 
+    if not 1 <= limit <= 1000:
+        raise HTTPException(status_code=400, detail="limit must be between 1 and 1000")
+    from SharedParams.Config import load
+
+    cfg = load()
+    asset = asset.upper()
+    if asset not in cfg.backtest.assets:
+        raise HTTPException(status_code=400, detail="unsupported asset")
+    if interval not in {"1m", "5m", "15m", "1h", "4h", "1d"}:
+        raise HTTPException(status_code=400, detail="unsupported interval")
     end = datetime.now(timezone.utc)
-    start = end - timedelta(hours=limit)
-    df = fetch_historical([asset], start.isoformat(), end.isoformat())
-    return df.to_dicts()
+    start = end - timedelta(milliseconds=INTERVAL_MS[interval] * limit)
+    df = fetch_historical([asset], start.isoformat(), end.isoformat(), interval=interval)
+    return df.tail(limit).to_dicts()
 
 
 # ── Kill switch ───────────────────────────────────────────────────────────────
 
 
 @app.get("/api/kill")
-async def kill_status(user: _User) -> dict[str, bool]:
-    active = _KILL_SWITCH.exists() and json.loads(_KILL_SWITCH.read_text()).get("active", False)
-    return {"active": active}
+def kill_status(user: _User) -> dict[str, bool]:
+    return {"active": kill_active(_KILL_SWITCH)}
 
 
 @app.post("/api/kill/activate")
-async def kill_activate(user: _User) -> dict[str, str]:
-    if user.role not in {"admin", "service_role"}:
+def kill_activate(user: _User) -> dict[str, str]:
+    if user.role != "admin":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="admin only")
-    _KILL_SWITCH.parent.mkdir(parents=True, exist_ok=True)
-    _KILL_SWITCH.write_text(json.dumps({"active": True, "by": user.id}))
+    _write_kill(True, user.id)
     return {"status": "activated"}
 
 
 @app.post("/api/kill/reset")
-async def kill_reset(user: _User) -> dict[str, str]:
-    if user.role not in {"admin", "service_role"}:
+def kill_reset(user: _User) -> dict[str, str]:
+    if user.role != "admin":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="admin only")
-    if _KILL_SWITCH.exists():
-        _KILL_SWITCH.write_text(json.dumps({"active": False}))
+    _write_kill(False)
     return {"status": "reset"}
 
 
@@ -233,7 +296,7 @@ async def kill_reset(user: _User) -> dict[str, str]:
 
 
 @app.get("/api/backtest")
-async def run_backtest_endpoint(user: _User) -> dict[str, Any]:
+def run_backtest_endpoint(user: _User) -> dict[str, Any]:
     from Backtest.Runner import run
 
     result = run()
