@@ -22,15 +22,23 @@ def build_equity_figure(curves: pl.DataFrame) -> go.Figure:
         roi = ((curve["equity"] / initial) - 1.0) * 100.0
         traces.append(
             go.Scattergl(
-                x=curve["timestamp"].to_list(), y=roi.to_list(), mode="lines", name=asset,
+                x=curve["timestamp"].to_list(),
+                y=roi.to_list(),
+                mode="lines",
+                name=asset,
                 line={"color": _COLORS[index % len(_COLORS)], "width": 3 if asset == "TOTAL" else 2},
                 hovertemplate=f"{asset}: %{{y:.2f}}%<br>%{{x|%Y-%m-%d %H:%M}}<extra></extra>",
             )
         )
     figure = go.Figure(data=traces)
     figure.update_layout(
-        template="plotly_dark", uirevision="equity", title="Equity — " + ", ".join(assets),
-        xaxis_title="Date", yaxis={"title": "Return (%)", "ticksuffix": "%"}, hovermode="x unified",
-        legend={"orientation": "h", "y": 1.08}, margin={"l": 70, "r": 40, "t": 90, "b": 60},
+        template="plotly_dark",
+        uirevision="equity",
+        title="Equity — " + ", ".join(assets),
+        xaxis_title="Date",
+        yaxis={"title": "Return (%)", "ticksuffix": "%"},
+        hovermode="x unified",
+        legend={"orientation": "h", "y": 1.08},
+        margin={"l": 70, "r": 40, "t": 90, "b": 60},
     )
     return figure

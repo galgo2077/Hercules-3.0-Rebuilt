@@ -5,13 +5,12 @@ build-backend = "maturin"
 [project]
 name = "hercules"
 version = "0.1.0"
-requires-python = ">=3.12"
+requires-python = ">=3.12,<3.14"
 dependencies = [
     "cryptography>=44.0.0",
     "dash>=3.0.0",
     "fastapi[standard]>=0.116.0",
     "httpx>=0.28.0",
-    "json5>=0.12.1",
     "numpy>=2.0.0",
     "polars>=1.0",
     "polars-talib>=0.1.6",
@@ -31,7 +30,7 @@ features = ["pyo3/extension-module"]
 testpaths = ["tests"]
 addopts = "-s"
 pythonpath = ["."]
-markers = ["slow: requires Binance network and original repo (deselect with -m 'not slow')"]
+markers = ["slow: runs the full checked-in historical dataset (deselect with -m 'not slow')"]
 
 [tool.ruff]
 line-length = 300

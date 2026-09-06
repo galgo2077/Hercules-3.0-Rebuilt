@@ -288,9 +288,7 @@ def _results_views(result: BacktestResult) -> list[DashboardView]:
         rows = rows.sort("win_rate", descending=True)
     sorted_results = pl.concat([rows, total.unique(subset=["asset"], keep="first", maintain_order=True)])
     if {"end_money", "roi_usd"} <= set(sorted_results.columns):
-        sorted_results = sorted_results.with_columns(
-            (pl.col("end_money") - pl.col("roi_usd")).alias("initial_equity")
-        )
+        sorted_results = sorted_results.with_columns((pl.col("end_money") - pl.col("roi_usd")).alias("initial_equity"))
     # cycles: count of direction reversals per asset (long→short or short→long)
     # shows how many times the strategy closed one side to open the opposite
     type_col = next((c for c in ("type", "side") if c in result.trades.columns), None)
@@ -302,15 +300,15 @@ def _results_views(result: BacktestResult) -> list[DashboardView]:
             sides = t[type_col].to_list()
             cycle_counts[asset] = sum(1 for i in range(len(sides) - 1) if sides[i] != sides[i + 1])
         total_cycles = sum(cycle_counts.values())
-        per_asset = pl.DataFrame({
-            "asset": list(cycle_counts.keys()),
-            "cycles": pl.Series(list(cycle_counts.values()), dtype=pl.Int64),
-        })
+        per_asset = pl.DataFrame(
+            {
+                "asset": list(cycle_counts.keys()),
+                "cycles": pl.Series(list(cycle_counts.values()), dtype=pl.Int64),
+            }
+        )
         total_row = pl.DataFrame({"asset": ["TOTAL"], "cycles": pl.Series([total_cycles], dtype=pl.Int64)})
         closed_map = pl.concat([per_asset, total_row])
-        sorted_results = sorted_results.join(closed_map, on="asset", how="left").with_columns(
-            pl.col("cycles").fill_null(0)
-        )
+        sorted_results = sorted_results.join(closed_map, on="asset", how="left").with_columns(pl.col("cycles").fill_null(0))
     columns = [column for column in sorted_results.columns if column not in ("start", "end")]
     percent = tuple(column for column in ("roi", "buy_and_hold_roi", "max_drawdown", "win_rate", "win_longs_pct", "win_shorts_pct", "nlb&h_roi") if column in columns)
     pnl = tuple(column for column in ("asset", "win_rate", "win_longs_pct", "win_shorts_pct", "initial_equity", "end_money", "roi", "roi_usd", "max_drawdown", "max_drawdown_usd") if column in columns)
@@ -319,14 +317,19 @@ def _results_views(result: BacktestResult) -> list[DashboardView]:
     context = f"Range: {results['start'][0]} to {results['end'][0]} | Drawdown: worst intrabar equity fall vs realized-equity peak" if {"start", "end"} <= set(results.columns) else ""
     twin = DashboardView("Results", sorted_results, pnl, context, False, percent, color_thresholds=thresholds)
     return [DashboardView("Results Risk", sorted_results, risk, context, False, percent, twin, thresholds)]
+
+
 def print_results(result: BacktestResult) -> None:
     """Show the Hercules 3.0 table dashboard with on-demand chart visualizer."""
     views = _results_views(result)
     views.extend(DashboardView(name, frame, tuple(frame.columns), filter_assets=False) for name, frame in (("Trades", result.trades), ("Strategy", result.strategy), ("Equity", result.equity)))
     if sys.stdin.isatty() and sys.stdout.isatty():
+
         def open_visualizer() -> None:
             from Backtest.Visualizator import launch_visualizer
+
             launch_visualizer(result.strategy, result.trades, result.equity, results=result.results)
+
         curses.wrapper(lambda screen: BacktestDashboard(screen, "BACKTEST EXPLORER", views, open_visualizer).run())
         return
     _con.print("BACKTEST EXPLORER: interactive TUI requires a terminal")

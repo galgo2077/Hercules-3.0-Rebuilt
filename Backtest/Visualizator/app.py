@@ -27,11 +27,19 @@ def resample_candles(frame: pl.DataFrame) -> pl.DataFrame:
         return frame
     step = max(2, ceil(frame.height / _MAX_CANDLES))
     return (
-        frame.with_row_index("_index").with_columns((pl.col("_index") // step).alias("_group"))
-        .group_by("_group").agg(
-            pl.col("timestamp").first(), pl.col("open").first(), pl.col("high").max(),
-            pl.col("low").min(), pl.col("close").last(), pl.col("direction").last(),
-        ).sort("timestamp").drop("_group")
+        frame.with_row_index("_index")
+        .with_columns((pl.col("_index") // step).alias("_group"))
+        .group_by("_group")
+        .agg(
+            pl.col("timestamp").first(),
+            pl.col("open").first(),
+            pl.col("high").max(),
+            pl.col("low").min(),
+            pl.col("close").last(),
+            pl.col("direction").last(),
+        )
+        .sort("timestamp")
+        .drop("_group")
     )
 
 
@@ -53,16 +61,23 @@ def _literal(value: datetime, frame: pl.DataFrame) -> pl.Expr:
 
 def _asset_traces(rows: list[dict[str, object]], trades: list[dict[str, object]]) -> list[dict[str, object]]:
     timestamps, closes = [row["timestamp"] for row in rows], [row["close"] for row in rows]
-    traces: list[dict[str, object]] = [{
-        "type": "candlestick", "x": timestamps, "open": [row["open"] for row in rows],
-        "high": [row["high"] for row in rows], "low": [row["low"] for row in rows], "close": closes,
-        "increasing": {"line": {"color": "#fff"}, "fillcolor": "#fff"},
-        "decreasing": {"line": {"color": "#888"}, "fillcolor": "#000"}, "name": "Candles",
-    }]
+    traces: list[dict[str, object]] = [
+        {
+            "type": "candlestick",
+            "x": timestamps,
+            "open": [row["open"] for row in rows],
+            "high": [row["high"] for row in rows],
+            "low": [row["low"] for row in rows],
+            "close": closes,
+            "increasing": {"line": {"color": "#fff"}, "fillcolor": "#fff"},
+            "decreasing": {"line": {"color": "#888"}, "fillcolor": "#000"},
+            "name": "Candles",
+        }
+    ]
     start = 0
     for direction, group in groupby(str(row["direction"]) for row in rows):
         end = start + sum(1 for _ in group) - 1
-        traces.append({"type": "scattergl", "x": timestamps[max(0, start - 1): end + 1], "y": closes[max(0, start - 1): end + 1], "mode": "lines", "line": {"color": _TREND_COLORS.get(direction, "#95a5a6"), "width": 2}, "hoverinfo": "skip", "showlegend": False})
+        traces.append({"type": "scattergl", "x": timestamps[max(0, start - 1) : end + 1], "y": closes[max(0, start - 1) : end + 1], "mode": "lines", "line": {"color": _TREND_COLORS.get(direction, "#95a5a6"), "width": 2}, "hoverinfo": "skip", "showlegend": False})
         start = end + 1
     for kind, color in _TRADE_COLORS.items():
         selected = [trade for trade in trades if (str(trade["type"]), str(trade["outcome"])) == kind]
@@ -75,11 +90,13 @@ def _asset_traces(rows: list[dict[str, object]], trades: list[dict[str, object]]
         exit_prices = [float(cast(float | int | str, trade["exit_price"])) for trade in selected]
         lines_x = [point for trade in selected for point in (trade["timestamp"], trade["exit_timestamp"], None)]
         lines_y = [point for trade in selected for point in (float(cast(float | int | str, trade["open"])), float(cast(float | int | str, trade["exit_price"])), None)]
-        traces.extend([
-            {"type": "scattergl", "x": lines_x, "y": lines_y, "mode": "lines", "line": {"color": color, "width": 1, "dash": "dot"}, "hoverinfo": "skip", "showlegend": False},
-            {"type": "scattergl", "x": entries, "y": opens, "mode": "markers", "marker": {"color": color, "size": 14, "symbol": "triangle-up" if is_long else "triangle-down"}, "name": f"{kind[0]} {kind[1]} entry"},
-            {"type": "scattergl", "x": exits, "y": exit_prices, "mode": "markers", "marker": {"color": color, "size": 12, "symbol": "triangle-down" if is_long else "triangle-up"}, "name": f"{kind[0]} {kind[1]} exit"},
-        ])
+        traces.extend(
+            [
+                {"type": "scattergl", "x": lines_x, "y": lines_y, "mode": "lines", "line": {"color": color, "width": 1, "dash": "dot"}, "hoverinfo": "skip", "showlegend": False},
+                {"type": "scattergl", "x": entries, "y": opens, "mode": "markers", "marker": {"color": color, "size": 14, "symbol": "triangle-up" if is_long else "triangle-down"}, "name": f"{kind[0]} {kind[1]} entry"},
+                {"type": "scattergl", "x": exits, "y": exit_prices, "mode": "markers", "marker": {"color": color, "size": 12, "symbol": "triangle-down" if is_long else "triangle-up"}, "name": f"{kind[0]} {kind[1]} exit"},
+            ]
+        )
     return traces
 
 
@@ -101,11 +118,17 @@ def _asset_figure(frame: pl.DataFrame, trades: pl.DataFrame, asset: str, start: 
     padding = max((max(highs) - min(lows)) * 0.05, max(highs) * 0.001)
     figure = go.Figure(data=_asset_traces(rows, asset_trades.to_dicts()))
     figure.update_layout(
-        template="plotly_dark", uirevision=asset, title=f"{asset} — candles, trend, trades",
-        xaxis_title="Date", yaxis_title="Price", xaxis_rangeslider_visible=False,
+        template="plotly_dark",
+        uirevision=asset,
+        title=f"{asset} — candles, trend, trades",
+        xaxis_title="Date",
+        yaxis_title="Price",
+        xaxis_rangeslider_visible=False,
         xaxis_range=[rows[0]["timestamp"], rows[-1]["timestamp"]],
-        yaxis_range=[min(lows) - padding, max(highs) + padding], hovermode="closest",
-        showlegend=False, margin={"l": 60, "r": 40, "t": 60, "b": 60},
+        yaxis_range=[min(lows) - padding, max(highs) + padding],
+        hovermode="closest",
+        showlegend=False,
+        margin={"l": 60, "r": 40, "t": 60, "b": 60},
     )
     return figure
 
@@ -129,18 +152,28 @@ def launch_visualizer(strategy: pl.DataFrame, trades: pl.DataFrame, equity: pl.D
     tab = {"backgroundColor": "#111", "color": "#888", "border": "none", "padding": "6px 14px"}
     selected = {**tab, "backgroundColor": "#222", "color": "#fff", "borderBottom": "2px solid #4fc3f7"}
     app = Dash(__name__, suppress_callback_exceptions=True)
-    app.layout = html.Div([
-        html.Div(stats, style={"padding": "8px 12px", "backgroundColor": "#111", "color": "#ccc"}),
-        dcc.Tabs(id="view", value="price", children=[dcc.Tab(label="Price", value="price", style=tab, selected_style=selected), dcc.Tab(label="Equity", value="equity", style=tab, selected_style=selected)]),
-        html.Div([
-            dcc.Tabs(id="asset", value=assets[0], children=[dcc.Tab(label=asset, value=asset, style=tab, selected_style=selected) for asset in assets]),
-            dcc.Graph(id="price", figure=_asset_figure(strategy, trades, assets[0]), config={"scrollZoom": True, "displaylogo": False}, style={"height": "calc(100vh - 100px)"}),
-        ], id="price-panel"),
-        html.Div([
-            dcc.Tabs(id="equity-asset", value=equity_assets[0], children=[dcc.Tab(label=asset, value=asset, style=tab, selected_style=selected) for asset in equity_assets]),
-            dcc.Graph(id="equity", figure=build_equity_figure(equity.filter(pl.col("asset") == equity_assets[0])), config={"scrollZoom": True, "displaylogo": False}, style={"height": "calc(100vh - 100px)"}),
-        ], id="equity-panel", style={"display": "none"}),
-    ], style={"backgroundColor": "#111", "margin": "0"})
+    app.layout = html.Div(
+        [
+            html.Div(stats, style={"padding": "8px 12px", "backgroundColor": "#111", "color": "#ccc"}),
+            dcc.Tabs(id="view", value="price", children=[dcc.Tab(label="Price", value="price", style=tab, selected_style=selected), dcc.Tab(label="Equity", value="equity", style=tab, selected_style=selected)]),
+            html.Div(
+                [
+                    dcc.Tabs(id="asset", value=assets[0], children=[dcc.Tab(label=asset, value=asset, style=tab, selected_style=selected) for asset in assets]),
+                    dcc.Graph(id="price", figure=_asset_figure(strategy, trades, assets[0]), config={"scrollZoom": True, "displaylogo": False}, style={"height": "calc(100vh - 100px)"}),
+                ],
+                id="price-panel",
+            ),
+            html.Div(
+                [
+                    dcc.Tabs(id="equity-asset", value=equity_assets[0], children=[dcc.Tab(label=asset, value=asset, style=tab, selected_style=selected) for asset in equity_assets]),
+                    dcc.Graph(id="equity", figure=build_equity_figure(equity.filter(pl.col("asset") == equity_assets[0])), config={"scrollZoom": True, "displaylogo": False}, style={"height": "calc(100vh - 100px)"}),
+                ],
+                id="equity-panel",
+                style={"display": "none"},
+            ),
+        ],
+        style={"backgroundColor": "#111", "margin": "0"},
+    )
 
     @app.callback(Output("price", "figure"), Input("asset", "value"), Input("price", "relayoutData"))
     def update_price(asset: str, relayout: dict[str, object] | None) -> go.Figure:

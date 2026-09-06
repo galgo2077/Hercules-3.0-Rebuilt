@@ -12,9 +12,12 @@ from Backtest.Visualizator.app import resample_candles
 def test_resample_candles_preserves_ohlc_extremes() -> None:
     frame = pl.DataFrame(
         {
-            "timestamp": list(range(601)), "open": [float(i) for i in range(601)],
-            "high": [float(i + 10) for i in range(601)], "low": [float(i - 10) for i in range(601)],
-            "close": [float(i + 1) for i in range(601)], "direction": ["BULLISH"] * 601,
+            "timestamp": list(range(601)),
+            "open": [float(i) for i in range(601)],
+            "high": [float(i + 10) for i in range(601)],
+            "low": [float(i - 10) for i in range(601)],
+            "close": [float(i + 1) for i in range(601)],
+            "direction": ["BULLISH"] * 601,
         }
     )
     reduced = resample_candles(frame)

@@ -202,10 +202,7 @@ def test_traces_bullish_trend_color() -> None:
     frame = _make_candles(5)
     rows = frame.with_columns(pl.lit("BULLISH").alias("direction")).to_dicts()
     traces = _asset_traces(rows, [])
-    line_traces = [
-        t for t in traces
-        if t.get("type") == "scattergl" and t.get("mode") == "lines"
-    ]
+    line_traces = [t for t in traces if t.get("type") == "scattergl" and t.get("mode") == "lines"]
     colors = {t["line"]["color"] for t in line_traces}
     assert _TREND_COLORS["BULLISH"] in colors
 
@@ -214,10 +211,7 @@ def test_traces_bearish_trend_color() -> None:
     frame = _make_candles(5)
     rows = frame.with_columns(pl.lit("BEARISH").alias("direction")).to_dicts()
     traces = _asset_traces(rows, [])
-    line_traces = [
-        t for t in traces
-        if t.get("type") == "scattergl" and t.get("mode") == "lines"
-    ]
+    line_traces = [t for t in traces if t.get("type") == "scattergl" and t.get("mode") == "lines"]
     colors = {t["line"]["color"] for t in line_traces}
     assert _TREND_COLORS["BEARISH"] in colors
 
@@ -376,11 +370,10 @@ def test_launch_visualizer_empty_equity_raises() -> None:
 def test_launch_visualizer_starts_without_browser(monkeypatch) -> None:
     try:
         from dash import Dash  # noqa: F401
+
         from Backtest.Visualizator.app import launch_visualizer
     except ImportError:
         pytest.skip("dash not installed")
-
-    import threading as _threading
 
     started: list[str] = []
 
