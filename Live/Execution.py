@@ -88,7 +88,12 @@ def exit_position(client: Any, symbol: str, side: str, quantity: float | None = 
         positionSide=side,
         quantity=quantity,
     )
-    if _position(client, symbol, side, attempts=3) is not None:
+    for attempt in range(30):
+        if _position(client, symbol, side) is None:
+            break
+        if attempt < 29:
+            sleep(0.1)
+    else:
         raise RuntimeError(f"exchange did not confirm {side} close for {symbol}")
     try:
         _cancel_protection(client, symbol, side)

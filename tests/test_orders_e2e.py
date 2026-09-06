@@ -170,6 +170,24 @@ def test_exit_confirms_close_before_reporting_cancellation_failure() -> None:
     assert client.positions[("BTCUSDT", "LONG")] == 0
 
 
+def test_exit_waits_for_delayed_exchange_confirmation() -> None:
+    from Live.Orders import Long
+
+    class DelayedClient(FakeClient):
+        stale_reads = 4
+
+        def get(self, path: str, **kwargs):
+            if "positionRisk" in path and self.positions.get(("BTCUSDT", "LONG")) == 0 and self.stale_reads:
+                self.stale_reads -= 1
+                return [{"symbol": "BTCUSDT", "positionSide": "LONG", "positionAmt": "0.1"}]
+            return super().get(path, **kwargs)
+
+    client = DelayedClient()
+    client.positions[("BTCUSDT", "LONG")] = 0.1
+    Long.exit(client, "BTCUSDT")
+    assert client.stale_reads == 0
+
+
 @pytest.mark.parametrize("quantity", [0, -1, float("nan"), float("inf")])
 def test_invalid_quantities_are_rejected(quantity: float) -> None:
     from Live.Execution import quantize_quantity
