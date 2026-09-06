@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-
-from postgrest.types import JSON
+from datetime import datetime, timezone
 
 from SharedParams.Supabase import get_client, get_service_client
 
@@ -22,7 +21,7 @@ def insert_trade(
     entry_price: float,
     quantity: float,
 ) -> int:
-    row: Mapping[str, JSON] = {
+    row: Mapping[str, object] = {
         "account_id": account_id,
         "asset": asset,
         "side": side,
@@ -39,6 +38,7 @@ def insert_trade(
 
 
 def close_trade(
+    account_id: str,
     trade_id: int,
     exit_time: str,
     exit_price: float,
@@ -54,7 +54,7 @@ def close_trade(
             "fee": fee,
             "outcome": outcome,
         }
-    ).eq("id", trade_id).execute()
+    ).eq("id", trade_id).eq("account_id", account_id).execute()
 
 
 def list_trades(account_id: str, limit: int = 50) -> list[dict]:
@@ -99,15 +99,14 @@ def upsert_position(
             "side": side,
             "size_usdt": size_usdt,
             "entry_price": entry_price,
-            # updated_at has DEFAULT now() but upsert won't refresh it automatically
-            "updated_at": "now()",
+            "updated_at": datetime.now(timezone.utc).isoformat(),
         },
-        on_conflict="account_id,asset",
+        on_conflict="account_id,asset,side",
     ).execute()
 
 
-def clear_position(account_id: str, asset: str) -> None:
-    get_service_client().table("live_positions").delete().eq("account_id", account_id).eq("asset", asset).execute()
+def clear_position(account_id: str, asset: str, side: str) -> None:
+    get_service_client().table("live_positions").delete().eq("account_id", account_id).eq("asset", asset).eq("side", side).execute()
 
 
 def list_positions(account_id: str) -> list[dict]:

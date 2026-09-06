@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-import signal
-import time
-
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -13,8 +10,9 @@ load_dotenv()
 def _load_accounts() -> list[dict]:
     """Fetch all exchange_accounts rows from DB. Returns list of account dicts."""
     from SharedParams.Supabase import get_service_client
+
     resp = get_service_client().table("exchange_accounts").select("id,label,environment").execute()
-    return resp.data if isinstance(resp.data, list) else []
+    return [dict(row) for row in resp.data if isinstance(row, dict)] if isinstance(resp.data, list) else []
 
 
 def main() -> None:
@@ -29,25 +27,27 @@ def main() -> None:
     workers: list[AccountWorker] = []
     for acc in accounts:
         w = AccountWorker(
-            account_id=acc["id"],
-            label=acc.get("label", acc["id"]),
-            environment=acc.get("environment", "testnet"),
+            account_id=str(acc["id"]),
+            label=str(acc.get("label") or acc["id"]),
+            environment=str(acc.get("environment") or "testnet"),
         )
-        w.start()
-        workers.append(w)
+        try:
+            started = w.start()
+        except Exception as exc:
+            print(f"Failed to start account {w.label}: {exc}")
+        else:
+            if not started:
+                continue
+            workers.append(w)
 
     print(f"Started {len(workers)} account worker(s): {[w.label for w in workers]}")
 
-    def _shutdown(sig, frame):  # noqa: ANN001
-        print("\nShutting down workers...")
-        for w in workers:
-            w.stop()
-
-    signal.signal(signal.SIGINT, _shutdown)
-    signal.signal(signal.SIGTERM, _shutdown)
-
     config = load()
-    serve(config)  # blocks — uvicorn runs here
+    try:
+        serve(config)  # blocks — uvicorn runs here
+    finally:
+        for worker in workers:
+            worker.stop()
 
 
 if __name__ == "__main__":
