@@ -65,7 +65,7 @@ class DemoEngine:
         self._assets: list[str] = list(self._pf.get("allocation", {}).keys())
         self._interval: str = self._live.get("interval", "1h")
         self._reconnect: int = int(self._live.get("reconnect_delay_s", 5))
-        self._rest_url: str = self._live.get("binance_base_url", _DEMO_REST)
+        self._rest_url = _DEMO_REST
         self._ws_url = _DEMO_WS
         self._tracker = PositionTracker()
         self._buffer = CandleBuffer(capacity=600)

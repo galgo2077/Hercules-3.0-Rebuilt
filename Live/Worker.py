@@ -4,7 +4,6 @@ import os
 import socket
 import threading
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
 from typing import Protocol
 
 from SharedParams.Supabase import get_service_client
@@ -33,11 +32,7 @@ def acquire_lease(account_id: str, worker_id: str, ttl_seconds: int = 60) -> boo
 
 
 def renew_lease(account_id: str, worker_id: str, ttl_seconds: int = 60) -> bool:
-    db = get_service_client()
-    now = datetime.now(timezone.utc)
-    expires_at = (now + timedelta(seconds=ttl_seconds)).isoformat()
-    result = db.table("worker_leases").update({"expires_at": expires_at}).eq("account_id", account_id).eq("worker_id", worker_id).execute()
-    return bool(result.data)
+    return acquire_lease(account_id, worker_id, ttl_seconds)
 
 
 def release_lease(account_id: str, worker_id: str) -> None:

@@ -2,6 +2,5 @@
 # Secrets (API keys) come from .env, never from TOML.
 
 mode              = "demo"        # demo | real
-binance_base_url  = "https://demo-fapi.binance.com"
 reconnect_delay_s = 5
 candle_timeout_s  = 90

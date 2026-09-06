@@ -71,12 +71,18 @@ CREATE OR REPLACE FUNCTION acquire_worker_lease(
     p_account_id UUID, p_worker_id TEXT, p_ttl_seconds INTEGER DEFAULT 60
 ) RETURNS BOOLEAN LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 BEGIN
+    IF p_ttl_seconds IS NULL OR p_ttl_seconds <= 0 THEN
+        RETURN FALSE;
+    END IF;
     INSERT INTO worker_leases(account_id, worker_id, expires_at, acquired_at)
     VALUES (p_account_id, p_worker_id, now() + make_interval(secs => p_ttl_seconds), now())
     ON CONFLICT (account_id) DO UPDATE
       SET worker_id = EXCLUDED.worker_id,
           expires_at = EXCLUDED.expires_at,
-          acquired_at = EXCLUDED.acquired_at
+          acquired_at = CASE
+              WHEN worker_leases.expires_at <= now() THEN EXCLUDED.acquired_at
+              ELSE worker_leases.acquired_at
+          END
       WHERE worker_leases.expires_at <= now() OR worker_leases.worker_id = EXCLUDED.worker_id;
     RETURN FOUND;
 END;

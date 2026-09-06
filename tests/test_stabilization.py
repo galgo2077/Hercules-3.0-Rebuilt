@@ -155,6 +155,14 @@ def test_worker_modes_are_explicit() -> None:
         _engine_for("live")
 
 
+def test_execution_endpoints_are_not_configurable_fallbacks() -> None:
+    from Live.Demo import DemoEngine
+    from Live.Real import RealEngine
+
+    assert DemoEngine(api_key="key", api_secret="secret")._rest_url == "https://testnet.binancefuture.com"
+    assert RealEngine(api_key="key", api_secret="secret")._rest_url == "https://fapi.binance.com"
+
+
 def test_all_modes_start_and_stop_without_trading(monkeypatch) -> None:
     from Live.Demo import DemoEngine
     from Live.Paper import PaperEngine
@@ -177,7 +185,7 @@ def test_all_modes_start_and_stop_without_trading(monkeypatch) -> None:
 
 
 def test_lease_acquisition_uses_one_rpc(monkeypatch) -> None:
-    from Live.Worker import acquire_lease
+    from Live.Worker import acquire_lease, renew_lease
 
     calls = []
 
@@ -195,7 +203,11 @@ def test_lease_acquisition_uses_one_rpc(monkeypatch) -> None:
 
     monkeypatch.setattr("Live.Worker.get_service_client", Database)
     assert acquire_lease("account", "worker", 30) is True
-    assert calls == [("acquire_worker_lease", {"p_account_id": "account", "p_worker_id": "worker", "p_ttl_seconds": 30})]
+    assert renew_lease("account", "worker", 30) is True
+    assert calls == [
+        ("acquire_worker_lease", {"p_account_id": "account", "p_worker_id": "worker", "p_ttl_seconds": 30}),
+        ("acquire_worker_lease", {"p_account_id": "account", "p_worker_id": "worker", "p_ttl_seconds": 30}),
+    ]
 
 
 def test_real_listener_initializes_hedge_mode(monkeypatch) -> None:
@@ -262,5 +274,12 @@ def test_schema_has_atomic_lease_rls_and_rerunnable_policies() -> None:
     schema = (Path(__file__).resolve().parents[1] / "Storage" / "schema.sql").read_text(encoding="utf-8")
     assert "PRIMARY KEY (account_id, asset, side)" in schema
     assert "CREATE OR REPLACE FUNCTION acquire_worker_lease" in schema
+    assert "p_ttl_seconds IS NULL OR p_ttl_seconds <= 0" in schema
+    assert "worker_leases.expires_at <= now() OR worker_leases.worker_id = EXCLUDED.worker_id" in schema
     assert "ALTER TABLE worker_leases ENABLE ROW LEVEL SECURITY" in schema
     assert schema.count("DROP POLICY IF EXISTS") == schema.count("CREATE POLICY")
+
+
+def test_schema_account_modes_match_api() -> None:
+    schema = (Path(__file__).resolve().parents[1] / "Storage" / "schema.sql").read_text(encoding="utf-8")
+    assert schema.count("environment IN ('paper', 'testnet', 'real')") == 2

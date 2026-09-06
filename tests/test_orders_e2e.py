@@ -241,9 +241,21 @@ def test_step_size_rounds_down_and_enforces_minimum() -> None:
 
     client = FakeClient(price=3.0)
     assert quantize_quantity(1.239, 0.05) == 1.2
+    assert order_quantity(client, "BTCUSDT", 5.0, 5_000.0) == 0.001
     assert order_quantity(client, "BTCUSDT", 5.01, 3.0) == 1.67
     with pytest.raises(ValueError, match="below exchange minimum"):
         order_quantity(client, "BTCUSDT", 4.99, 3.0)
+
+
+def test_price_rounding_normalizes_non_tick_aligned_values(monkeypatch) -> None:
+    from Live._client import BinanceClient
+
+    client = BinanceClient("https://example.invalid", api_key="key", api_secret="secret")
+    monkeypatch.setattr(client, "tick_size", lambda _symbol: 0.1)
+    assert client.round_price("BTCUSDT", 100.04) == 100.0
+    assert client.round_price("BTCUSDT", 100.04, "up") == 100.1
+    assert client.round_price("BTCUSDT", 100.04, "down") == 100.0
+    client.close()
 
 
 def test_binance_client_routes_protection_to_algo_api(monkeypatch) -> None:
