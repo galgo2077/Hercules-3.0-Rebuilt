@@ -56,7 +56,7 @@ class PaperTrade:
 class PaperEngine:
     """Simulates live execution with virtual positions and P&L tracking."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, account_id: str | None = None) -> None:
         self._live, self._pf = _load_config()
         self._assets: list[str] = list(self._pf.get("allocation", {}).keys())
         self._interval: str = self._live.get("interval", "1h")
@@ -65,6 +65,7 @@ class PaperEngine:
         self._positions: dict[str, VirtualPosition] = {}
         self._trades: list[PaperTrade] = []
         self._running = False
+        self._account_id = account_id
         with (_ROOT / "SharedData" / "Backtest.toml").open("rb") as handle:
             cash = float(tomllib.load(handle)["capital"]["initial_cash"])
         self._risk = RiskState(
@@ -72,6 +73,25 @@ class PaperEngine:
             current_equity=cash,
             max_concurrent_shorts=int(self._pf.get("max_concurrent_shorts", 5)),
         )
+
+    def _persist(self) -> None:
+        if self._account_id is None:
+            return
+        from Storage.Repos import persist_snapshot
+
+        positions = []
+        for asset in self._assets:
+            position = self._positions.get(asset)
+            for side in ("LONG", "SHORT"):
+                positions.append(
+                    {
+                        "asset": asset,
+                        "side": side,
+                        "size_usdt": position.size_usdt if position is not None and position.side == side else 0.0,
+                        "entry_price": position.entry_price if position is not None and position.side == side else None,
+                    }
+                )
+        persist_snapshot(self._account_id, self._risk.current_equity, positions)
 
     def _stream_url(self) -> str:
         streams = "/".join(f"{a.lower()}@kline_{self._interval}" for a in self._assets)
@@ -105,6 +125,7 @@ class PaperEngine:
             stop_loss_price=sl,
             take_profit_price=tp,
         )
+        self._persist()
         log.info("PAPER %s %s @ %.4f (%.2f USDT) SL=%s TP=%s", side, asset, price, amount, f"{sl:.4f}" if sl else "none", f"{tp:.4f}" if tp else "none")
 
     def _exit(self, asset: str) -> None:
@@ -125,6 +146,7 @@ class PaperEngine:
             )
         )
         self._risk.current_equity += pnl
+        self._persist()
         log.info("PAPER EXIT %s %s pnl=%.4f equity=%.2f", asset, pos.side, pnl, self._risk.current_equity)
 
     def _on_closed_candle(self, msg: dict[str, Any]) -> None:

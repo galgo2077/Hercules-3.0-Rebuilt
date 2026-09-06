@@ -241,6 +241,23 @@ def test_real_listener_initializes_hedge_mode(monkeypatch) -> None:
     assert client.hedge is True
 
 
+def test_live_refresh_persists_both_hedge_sides(monkeypatch) -> None:
+    from Live.Demo import DemoEngine
+    from tests.test_orders_e2e import FakeClient
+
+    snapshots = []
+    monkeypatch.setattr("Storage.Repos.persist_snapshot", lambda account_id, equity, positions: snapshots.append((account_id, equity, positions)))
+    engine = DemoEngine(api_key="key", api_secret="secret", account_id="account-1")
+    client = FakeClient()
+    client.positions[("BTCUSDT", "LONG")] = 0.1
+    engine._refresh(client)
+    _, equity, positions = snapshots[-1]
+    assert equity == 10_000
+    assert len(positions) == len(engine._assets) * 2
+    btc = {(position["side"], position["size_usdt"]) for position in positions if position["asset"] == "BTCUSDT"}
+    assert btc == {("LONG", 5_000), ("SHORT", 0.0)}
+
+
 def test_schema_has_atomic_lease_rls_and_rerunnable_policies() -> None:
     schema = (Path(__file__).resolve().parents[1] / "Storage" / "schema.sql").read_text(encoding="utf-8")
     assert "PRIMARY KEY (account_id, asset, side)" in schema

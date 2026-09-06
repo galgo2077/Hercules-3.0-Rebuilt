@@ -35,6 +35,7 @@ updated: 2026-09-06
 | Critical/trading | Timed-out entry confirmation could leave a fill naked | `Execution.py` | missing-confirmation emergency-close test |
 | High/trading | Submitted protection was not confirmed | `Execution.py` | unconfirmed-protection emergency-close test |
 | High/data | Restart reconciliation missed exchange-only positions | `Reconcile.py` | empty-local/exchange-open test |
+| High/data | Refreshed exchange/paper state was not persisted | `Demo.py`, `Paper.py`, `Worker.py`, `Repos.py` | both-side snapshot persistence test |
 | High/correctness | Older replayed candles could trigger decisions | `CandleBuffer.py` | monotonic timestamp test |
 | High/numerical | Protection prices used nearest-tick rounding | `_client.py`, `Execution.py` | direction-aware SL/TP tests |
 | Medium/maintainability | Tuner mutated unused legacy thresholds | `Tuner.py`, `AutoTune.toml`, `Strategy.toml`, `Frame.py` | candidate changes consumed RDMA field |

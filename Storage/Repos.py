@@ -112,3 +112,12 @@ def clear_position(account_id: str, asset: str, side: str) -> None:
 def list_positions(account_id: str) -> list[dict]:
     res = get_client().table("live_positions").select("*").eq("account_id", account_id).execute()
     return _records(res.data)
+
+
+def persist_snapshot(account_id: str, equity_usdt: float, positions: list[dict]) -> None:
+    """Persist one authoritative account snapshot, including explicit flat sides."""
+    timestamp = datetime.now(timezone.utc).isoformat()
+    upsert_equity(account_id, timestamp, equity_usdt)
+    rows = [{"account_id": account_id, "updated_at": timestamp, **position} for position in positions]
+    if rows:
+        get_service_client().table("live_positions").upsert(rows, on_conflict="account_id,asset,side").execute()

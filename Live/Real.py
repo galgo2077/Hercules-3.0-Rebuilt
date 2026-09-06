@@ -12,6 +12,7 @@ log = logging.getLogger(__name__)
 _REAL_REST = "https://fapi.binance.com"
 _REAL_WS = "wss://fstream.binance.com/stream"
 
+
 class RealEngine(DemoEngine):
     """Production engine — inherits full candle loop from DemoEngine, uses live endpoints.
 
@@ -20,8 +21,8 @@ class RealEngine(DemoEngine):
     Selection is controlled by the validated account environment in AccountWorker.
     """
 
-    def __init__(self, *, api_key: str | None = None, api_secret: str | None = None, label: str = "real") -> None:
-        super().__init__(api_key=api_key, api_secret=api_secret, label=label)
+    def __init__(self, *, api_key: str | None = None, api_secret: str | None = None, label: str = "real", account_id: str | None = None) -> None:
+        super().__init__(api_key=api_key, api_secret=api_secret, label=label, account_id=account_id)
         # Override rest URL to production endpoint
         self._rest_url = _REAL_REST
         self._ws_url = _REAL_WS

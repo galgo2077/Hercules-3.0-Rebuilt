@@ -85,12 +85,12 @@ class AccountWorker:
             engine_cls = _engine_for(self.environment)
             label = self.label or self.account_id
             if self.environment.lower() == "paper":
-                kwargs = {}
+                kwargs = {"account_id": self.account_id}
             else:
                 from Live.Crypto import load_credential
 
                 api_key, api_secret = load_credential(self.account_id)
-                kwargs = {"api_key": api_key, "api_secret": api_secret, "label": label}
+                kwargs = {"api_key": api_key, "api_secret": api_secret, "label": label, "account_id": self.account_id}
             self._engine = engine_cls(**kwargs)
         except Exception:
             release_lease(self.account_id, self.worker_id)

@@ -55,10 +55,12 @@ class DemoEngine:
         api_key: str | None = None,
         api_secret: str | None = None,
         label: str = "demo",
+        account_id: str | None = None,
     ) -> None:
         self._api_key = api_key
         self._api_secret = api_secret
         self._label = label
+        self._account_id = account_id
         self._live, self._pf = _load_config()
         self._assets: list[str] = list(self._pf.get("allocation", {}).keys())
         self._interval: str = self._live.get("interval", "1h")
@@ -102,6 +104,22 @@ class DemoEngine:
             self._risk.initial_equity = equity
             self._equity_initialized = True
         self._risk.open_shorts = sum(position.side == "SHORT" and not position.is_flat for position in self._tracker.all().values())
+        if self._account_id is not None:
+            from Storage.Repos import persist_snapshot
+
+            positions = []
+            for asset in self._assets:
+                for side in ("LONG", "SHORT"):
+                    position = self._tracker.get(asset, side)
+                    positions.append(
+                        {
+                            "asset": asset,
+                            "side": side,
+                            "size_usdt": 0.0 if position.is_flat else position.size_usdt,
+                            "entry_price": None if position.is_flat else position.entry_price,
+                        }
+                    )
+            persist_snapshot(self._account_id, equity, positions)
 
     def _dispatch_candle(self, client: BinanceClient, msg: dict[str, Any]) -> None:
         """Parse message and schedule per-asset processing as a concurrent task."""
