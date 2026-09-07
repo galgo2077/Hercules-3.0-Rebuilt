@@ -481,7 +481,7 @@ wheels = [
 
 [[package]]
 name = "hercules"
-version = "0.1.0"
+version = "3.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "cryptography" },

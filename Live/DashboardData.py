@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Iterable
+from datetime import datetime, timezone
 from typing import Any
 
 log = logging.getLogger(__name__)
@@ -41,6 +42,50 @@ def _streaks(trades: list[dict[str, Any]]) -> tuple[int, int]:
     return best_wins, best_losses
 
 
+def _timestamp(value: Any) -> str:
+    return datetime.fromtimestamp(_number(value) / 1000, timezone.utc).isoformat()
+
+
+def _display_trades(positions: list[dict[str, Any]], fills: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Map Binance positions and closing fills to the dashboard trade shape."""
+    active = [
+        {
+            "entry_time": _timestamp(position.get("updateTime")),
+            "exit_time": None,
+            "asset": position.get("symbol"),
+            "side": position.get("positionSide"),
+            "quantity": abs(_number(position.get("positionAmt"))),
+            "entry_price": position.get("entryPrice"),
+            "exit_price": None,
+            "pnl": position.get("unRealizedProfit"),
+            "outcome": "open",
+            "source": "binance",
+        }
+        for position in positions
+    ]
+    closing = [
+        fill
+        for fill in fills
+        if (fill.get("positionSide") == "LONG" and fill.get("side") == "SELL") or (fill.get("positionSide") == "SHORT" and fill.get("side") == "BUY")
+    ]
+    closed = [
+        {
+            "entry_time": _timestamp(fill.get("time")),
+            "exit_time": _timestamp(fill.get("time")),
+            "asset": fill.get("symbol"),
+            "side": fill.get("positionSide"),
+            "quantity": fill.get("qty"),
+            "entry_price": None,
+            "exit_price": fill.get("price"),
+            "pnl": fill.get("realizedPnl"),
+            "outcome": "win" if _number(fill.get("realizedPnl")) > 0 else "loss" if _number(fill.get("realizedPnl")) < 0 else "closed",
+            "source": "binance",
+        }
+        for fill in closing
+    ]
+    return sorted([*active, *closed], key=lambda trade: str(trade["entry_time"]), reverse=True)
+
+
 def _exchange_snapshot(accounts: list[dict[str, Any]], assets: list[str]) -> dict[str, Any]:
     """Read account state from Binance without placing or modifying anything."""
     import httpx
@@ -62,16 +107,17 @@ def _exchange_snapshot(accounts: list[dict[str, Any]], assets: list[str]) -> dic
             with BinanceClient(base_url, api_key=api_key, api_secret=api_secret) as client:
                 balance = client.get("/fapi/v2/account")
                 risk = client.get("/fapi/v2/positionRisk")
-                for asset in assets:
-                    result = client.get("/fapi/v1/userTrades", symbol=asset, limit=100)
+                active_positions = [row for row in risk if _number(row.get("positionAmt")) != 0] if isinstance(risk, list) else []
+                for asset in sorted({*assets, *(str(row["symbol"]) for row in active_positions)}):
+                    result = client.get("/fapi/v1/userTrades", symbol=asset, limit=1000)
                     if isinstance(result, list):
                         trades.extend(result)
             usdt = next((row for row in balance.get("assets", []) if row.get("asset") == "USDT"), {})
             wallets.append(usdt)
             if isinstance(risk, list):
-                positions.extend(row for row in risk if _number(row.get("positionAmt")) != 0)
-        except (httpx.HTTPError, KeyError, OSError, RuntimeError, TypeError, ValueError) as exc:
-            log.warning("exchange snapshot failed for account %s: %s", account_id, exc)
+                positions.extend(active_positions)
+        except (httpx.HTTPError, KeyError, OSError, RuntimeError, TypeError, ValueError):
+            log.warning("exchange snapshot failed for account %s", account_id)
             errors.append({"account_id": account_id, "error": "exchange unavailable"})
     return {"wallets": wallets, "positions": positions, "trades": trades, "errors": errors}
 
@@ -86,19 +132,18 @@ def build_dashboard(user_id: str, leverage: float, configured_assets: list[str],
     if account_id:
         accounts = [account for account in accounts if str(account["id"]) == account_id]
     account_ids = [str(account["id"]) for account in accounts]
-    trades: list[dict[str, Any]] = []
     positions: list[dict[str, Any]] = []
     equity: list[dict[str, Any]] = []
     for account_id in account_ids:
-        trades.extend(_rows(db.table("trades").select("*").eq("account_id", account_id).order("entry_time", desc=True).limit(500).execute()))
         positions.extend(_rows(db.table("live_positions").select("*").eq("account_id", account_id).execute()))
         equity.extend(_rows(db.table("equity_snapshots").select("*").eq("account_id", account_id).order("ts", desc=False).limit(500).execute()))
 
-    assets = sorted({*configured_assets, *(str(row.get("asset")) for row in [*trades, *positions] if row.get("asset"))})
+    assets = sorted({*configured_assets, *(str(row.get("asset")) for row in positions if row.get("asset"))})
     exchange = _exchange_snapshot(accounts, assets) if accounts else {"wallets": [], "positions": [], "trades": [], "errors": []}
     exchange_positions = exchange["positions"]
     exchange_trades = exchange["trades"]
-    closed = [trade for trade in trades if trade.get("exit_time")]
+    display_trades = _display_trades(exchange_positions, exchange_trades)
+    closed = [trade for trade in display_trades if trade.get("exit_time")]
     pnls = [_number(trade.get("pnl")) for trade in closed]
     winners = [pnl for pnl in pnls if pnl > 0]
     losers = [pnl for pnl in pnls if pnl < 0]
@@ -107,22 +152,6 @@ def build_dashboard(user_id: str, leverage: float, configured_assets: list[str],
     latest_equity = wallet if exchange["wallets"] else (_number(equity[-1].get("equity_usdt")) if equity else 0.0)
     open_size = sum(abs(_number(position.get("notional"))) for position in exchange_positions)
     unrealized = sum(_number(position.get("unRealizedProfit")) for position in exchange_positions)
-    exchange_pnls = [_number(trade.get("realizedPnl")) for trade in exchange_trades]
-    exchange_winners = [pnl for pnl in exchange_pnls if pnl > 0]
-    exchange_losers = [pnl for pnl in exchange_pnls if pnl < 0]
-    display_trades = [
-        {
-            "entry_time": trade.get("time"),
-            "asset": trade.get("symbol"),
-            "side": trade.get("side"),
-            "quantity": trade.get("qty"),
-            "entry_price": trade.get("price"),
-            "exit_price": None,
-            "pnl": trade.get("realizedPnl"),
-            "outcome": "win" if _number(trade.get("realizedPnl")) > 0 else "loss" if _number(trade.get("realizedPnl")) < 0 else "open",
-        }
-        for trade in exchange_trades
-    ] or trades[:100]
     win_streak, loss_streak = _streaks(closed)
     gross_profit, gross_loss = sum(winners), abs(sum(losers))
     return {
@@ -138,20 +167,20 @@ def build_dashboard(user_id: str, leverage: float, configured_assets: list[str],
             "available_usdt": available if exchange["wallets"] else latest_equity - open_size,
             "max_leverage": max((_number(position.get("leverage")) for position in exchange_positions), default=leverage),
             "max_drawdown_usdt": _drawdown(_number(row.get("equity_usdt")) for row in equity),
-            "pnl_usdt": sum(exchange_pnls) if exchange_trades else sum(pnls),
-            "win_rate": len(exchange_winners) / len(exchange_pnls) if exchange_pnls else (len(winners) / len(closed) if closed else 0.0),
-            "profit_factor": (sum(exchange_winners) / abs(sum(exchange_losers)) if exchange_losers else None) if exchange_trades else (gross_profit / gross_loss if gross_loss else None),
-            "longs": sum(1 for trade in exchange_trades if trade.get("side") == "BUY") if exchange_trades else sum(1 for trade in trades if trade.get("side") == "LONG"),
-            "shorts": sum(1 for trade in exchange_trades if trade.get("side") == "SELL") if exchange_trades else sum(1 for trade in trades if trade.get("side") == "SHORT"),
-            "gross_profit_usdt": sum(exchange_winners) if exchange_trades else gross_profit,
-            "gross_loss_usdt": abs(sum(exchange_losers)) if exchange_trades else gross_loss,
-            "expectancy_usdt": (sum(exchange_pnls) / len(exchange_pnls)) if exchange_pnls else (sum(pnls) / len(closed) if closed else 0.0),
+            "pnl_usdt": sum(pnls),
+            "win_rate": len(winners) / len(closed) if closed else 0.0,
+            "profit_factor": gross_profit / gross_loss if gross_loss else None,
+            "longs": sum(1 for trade in closed if trade.get("side") == "LONG"),
+            "shorts": sum(1 for trade in closed if trade.get("side") == "SHORT"),
+            "gross_profit_usdt": gross_profit,
+            "gross_loss_usdt": gross_loss,
+            "expectancy_usdt": sum(pnls) / len(closed) if closed else 0.0,
             "best_trade_usdt": max(pnls, default=0.0),
             "worst_trade_usdt": min(pnls, default=0.0),
             "consecutive_wins": win_streak,
             "consecutive_losses": loss_streak,
             "unrealized_pnl_usdt": unrealized,
-            "fill_count": len(exchange_trades) if accounts and not exchange["errors"] else len(trades),
+            "fill_count": len(exchange_trades) if accounts and not exchange["errors"] else 0,
             "position_size": open_size,
             "funding_rate": None,
             "open_mismatches": 0,

@@ -17,3 +17,13 @@ def test_dashboard_does_not_load_remote_scripts() -> None:
     dashboard = Path(__file__).resolve().parents[1] / "dashboard"
     html = "\n".join(path.read_text(encoding="utf-8") for path in dashboard.glob("*.html"))
     assert '<script src="http' not in html
+
+
+def test_trade_table_has_status_filters_and_sorting() -> None:
+    dashboard = Path(__file__).resolve().parents[1] / "dashboard"
+    html = (dashboard / "index.html").read_text(encoding="utf-8")
+    script = (dashboard / "monitor.js").read_text(encoding="utf-8")
+    assert all(f'data-trade-filter="{value}"' in html for value in ("active", "closed", "all"))
+    assert 'id="tradeSort"' in html
+    assert "function isActive(trade)" in script
+    assert ".sort(sorters[tradeSort]||sorters.newest)" in script

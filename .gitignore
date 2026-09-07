@@ -33,6 +33,7 @@ Strategy/Rust/target/
 
 # Generated local artifacts
 .hercules/
+.cache/
 cache/
 graphify-out/
 *.sqlite3
