@@ -97,6 +97,7 @@ class BinanceClient:
             self._quantity_cache[symbol] = {
                 "step_size": float(lot["stepSize"]),
                 "min_qty": float(lot["minQty"]),
+                "max_qty": float(lot["maxQty"]),
                 "min_notional": float(notional.get("notional", 0)),
             }
         return self._quantity_cache[symbol]

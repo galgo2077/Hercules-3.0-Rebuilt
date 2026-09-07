@@ -31,7 +31,7 @@ class FakeClient:
         self.calls.append(("set_leverage", symbol, leverage))
 
     def quantity_filters(self, symbol: str) -> dict[str, float]:
-        return {"step_size": 0.001, "min_qty": 0.001, "min_notional": 5.0}
+        return {"step_size": 0.001, "min_qty": 0.001, "max_qty": 1_000.0, "min_notional": 5.0}
 
     def round_price(self, symbol: str, price: float, direction: str = "nearest") -> float:
         self.calls.append(("round_price", symbol, direction))
@@ -261,8 +261,13 @@ def test_step_size_rounds_down_and_enforces_minimum() -> None:
     assert quantize_quantity(1.239, 0.05) == 1.2
     assert order_quantity(client, "BTCUSDT", 5.0, 5_000.0) == 0.001
     assert order_quantity(client, "BTCUSDT", 5.01, 3.0) == 1.67
+    assert order_quantity(client, "ETHUSDT", 22.62807, 2_514.23) == 0.009
     with pytest.raises(ValueError, match="below exchange minimum"):
         order_quantity(client, "BTCUSDT", 4.99, 3.0)
+
+    client.quantity_filters = lambda _symbol: {"step_size": 1.0, "min_qty": 1.0, "max_qty": 2.0, "min_notional": 1.0}
+    with pytest.raises(ValueError, match="above exchange maximum"):
+        order_quantity(client, "BTCUSDT", 3.0, 1.0)
 
 
 def test_price_rounding_normalizes_non_tick_aligned_values(monkeypatch) -> None:
@@ -309,7 +314,7 @@ def test_binance_filter_cache_is_per_exchange_client(monkeypatch) -> None:
                 {
                     "symbol": "BTCUSDT",
                     "filters": [
-                        {"filterType": "LOT_SIZE", "stepSize": step, "minQty": step},
+                        {"filterType": "LOT_SIZE", "stepSize": step, "minQty": step, "maxQty": "1000"},
                         {"filterType": "MIN_NOTIONAL", "notional": "5"},
                     ],
                 }

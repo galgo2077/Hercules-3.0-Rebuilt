@@ -31,10 +31,14 @@ def order_quantity(client: Any, symbol: str, notional_usdt: float, price: float)
     if price <= 0 or notional_usdt <= 0:
         raise ValueError("price and notional must be positive")
     filters = client.quantity_filters(symbol) if hasattr(client, "quantity_filters") else {"step_size": 0.001, "min_qty": 0, "min_notional": 0}
-    quantity = quantize_quantity(notional_usdt / price, float(filters["step_size"]))
-    if quantity < float(filters.get("min_qty", 0)) or quantity * price < float(filters.get("min_notional", 0)):
+    step = Decimal(str(filters["step_size"]))
+    quantity_decimal = (Decimal(str(notional_usdt)) / Decimal(str(price)) / step).to_integral_value(rounding=ROUND_DOWN) * step
+    if quantity_decimal < Decimal(str(filters.get("min_qty", 0))) or quantity_decimal * Decimal(str(price)) < Decimal(str(filters.get("min_notional", 0))):
         raise ValueError(f"quantity below exchange minimum for {symbol}")
-    return quantity
+    max_qty = filters.get("max_qty")
+    if max_qty is not None and quantity_decimal > Decimal(str(max_qty)):
+        raise ValueError(f"quantity above exchange maximum for {symbol}")
+    return float(quantity_decimal)
 
 
 def _position(client: Any, symbol: str, side: str, attempts: int = 1) -> dict[str, Any] | None:
