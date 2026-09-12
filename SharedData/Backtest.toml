@@ -6,7 +6,7 @@ mode = "real"
 
 [data]
 start_date = "2020-04-01T00:00:00Z"
-end_date   = "2026-07-20T00:00:00Z"
+end_date   = "2026-08-22T00:00:00Z"
 timeframe  = "1h"
 assets     = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT"]
 
@@ -21,7 +21,7 @@ fee_rate      = 0.001
 slippage_rate = 0.0005
 flip_signals  = false
 # Maximum simultaneous entries in the same direction and asset.
-pyramiding_max = 3
+pyramiding_max = 5
 
 # Null-valued Hercules 3.0 optional controls are intentionally omitted: their
 # engine defaults are null/false and preserve the same execution behavior.

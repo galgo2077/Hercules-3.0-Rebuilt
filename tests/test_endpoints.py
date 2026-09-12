@@ -295,6 +295,15 @@ def test_candles_returns_list(client_user, monkeypatch):
     assert len(data) == 1
 
 
+def test_backtest_endpoint_uses_validated_golden_trades(client_user):
+    response = client_user.get("/api/backtest?asset=BTCUSDT")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["source"] == "golden-baseline"
+    assert data["trade_count"] == 2
+    assert not {"Take profit", "Stop loss"} & {trace.get("name") for trace in data["traces"]}
+
+
 # ── Config ────────────────────────────────────────────────────────────────────
 
 

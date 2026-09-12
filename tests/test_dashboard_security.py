@@ -10,7 +10,7 @@ def test_dashboard_has_no_html_injection_or_browser_token_storage() -> None:
 
 def test_interval_is_sent_to_candle_endpoint() -> None:
     monitor = (Path(__file__).resolve().parents[1] / "dashboard" / "monitor.js").read_text(encoding="utf-8")
-    assert "interval=${encodeURIComponent(interval)}" in monitor
+    assert "/api/candles?asset=${encodeURIComponent(asset)}&limit=200&interval=${encodeURIComponent(interval)}" in monitor
 
 
 def test_dashboard_does_not_load_remote_scripts() -> None:
@@ -27,3 +27,8 @@ def test_trade_table_has_status_filters_and_sorting() -> None:
     assert 'id="tradeSort"' in html
     assert "function isActive(trade)" in script
     assert ".sort(sorters[tradeSort]||sorters.newest)" in script
+    assert all(f"<th>{label}</th>" in html for label in ("TP", "SL", "Liq.", "Lev.", "Source"))
+    assert "actual fill markers" in html
+    assert "/monitor.js?v=9" in html
+    assert "entry → exit" in script
+    assert "BUY':'SELL" in script

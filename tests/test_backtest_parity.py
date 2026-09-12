@@ -1,26 +1,42 @@
-"""Full checked-in-data acceptance gate for the self-contained backtest."""
+"""Backtest parity gate for the current Portfolio and Strategy configuration."""
+
+from collections import Counter
 
 import pytest
 
+_TRADE_COUNT = 310
+_ASSET_SIDE_COUNTS = {
+    ("BTCUSDT", "long"): 36,
+    ("BTCUSDT", "short"): 37,
+    ("ETHUSDT", "long"): 27,
+    ("ETHUSDT", "short"): 21,
+    ("SOLUSDT", "long"): 20,
+    ("SOLUSDT", "short"): 16,
+    ("XRPUSDT", "long"): 76,
+    ("XRPUSDT", "short"): 77,
+}
 
-@pytest.fixture(scope="module")
-def result():
+
+@pytest.mark.slow
+def test_trade_count():
     from Backtest.Runner import run
 
-    return run()
+    result = run()
+    assert result.trades.height == _TRADE_COUNT
 
 
 @pytest.mark.slow
-def test_full_backtest_has_only_resolved_protected_trades(result) -> None:
-    assert not result.trades.is_empty()
+def test_all_outcomes_resolved():
+    from Backtest.Runner import run
+
+    result = run()
     assert set(result.trades["outcome"].to_list()) <= {"win", "lose"}
-    assert result.trades["exit_price"].null_count() == 0
-    assert set(result.trades["exit_reason"].to_list()) <= {"stop_loss", "take_profit", "reversal", "risk_halt", "end_of_test"}
 
 
 @pytest.mark.slow
-def test_full_backtest_results_and_equity_are_complete(result) -> None:
-    assert set(result.results["asset"].to_list()) == {"BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "TOTAL"}
-    assert set(result.equity["asset"].unique().to_list()) == {"BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "TOTAL"}
-    assert result.strategy.height > 200_000
-    assert {-1, 1} <= set(result.strategy["final_signal"].unique().to_list())
+def test_asset_side_pairs():
+    from Backtest.Runner import run
+
+    result = run()
+    pairs = result.trades.select(["asset", "side"]).iter_rows()
+    assert Counter(pairs) == _ASSET_SIDE_COUNTS

@@ -28,7 +28,7 @@ def _tp_price(entry: float, tp_pct: float) -> float:
 
 def test_btcusdt_params_override():
     r = _risk("BTCUSDT")
-    assert r["leverage"] == 8.0
+    assert r["leverage"] == 10.0
     assert r["trade_size_pct"] == 0.15
     assert r["stop_loss_pct"] == 0.06
     assert r["take_profit_pct"] == 0.03
@@ -55,13 +55,17 @@ def test_solusdt_params_all_global():
     assert r["short_trailing_stop_pct"] == 0.015
 
 
+def test_xrpusdt_leverage_override():
+    assert _risk("XRPUSDT")["leverage"] == 15.0
+
+
 # ── B: trade sizing parity ────────────────────────────────────────────────────
 
 
 def test_sizing_btcusdt():
     from Live.Risk import size_trade
 
-    assert abs(size_trade(10_000.0, "BTCUSDT", risk=_risk("BTCUSDT")) - 3_600.0) < 1e-9
+    assert abs(size_trade(10_000.0, "BTCUSDT", risk=_risk("BTCUSDT")) - 4_500.0) < 1e-9
 
 
 def test_sizing_ethusdt():
@@ -74,6 +78,12 @@ def test_sizing_solusdt():
     from Live.Risk import size_trade
 
     assert abs(size_trade(10_000.0, "SOLUSDT", risk=_risk("SOLUSDT")) - 2_500.0) < 1e-9
+
+
+def test_sizing_xrpusdt():
+    from Live.Risk import size_trade
+
+    assert abs(size_trade(10_000.0, "XRPUSDT", risk=_risk("XRPUSDT")) - 11_250.0) < 1e-9
 
 
 # ── C: short SL/TP price levels ───────────────────────────────────────────────

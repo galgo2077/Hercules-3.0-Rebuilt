@@ -79,6 +79,8 @@ def _make_trade(
         "outcome": outcome,
         "open": open_price,
         "exit_price": exit_price,
+        "stop_loss": open_price * 0.94,
+        "take_profit": open_price * 1.03,
     }
 
 
@@ -194,15 +196,20 @@ def test_traces_candlestick_price_count() -> None:
 def test_traces_includes_trend_line() -> None:
     rows = _make_candles(5).to_dicts()
     traces = _asset_traces(rows, [])
-    line_traces = [t for t in traces if t.get("type") == "scattergl" and t.get("mode") == "lines"]
+    line_traces = [t for t in traces if t.get("type") == "scatter" and t.get("mode") == "lines"]
     assert len(line_traces) >= 1
+
+
+def test_traces_include_take_profit_and_stop_loss() -> None:
+    traces = _asset_traces(_make_candles(10).to_dicts(), [_make_trade()])
+    assert {trace.get("name") for trace in traces} >= {"Take profit", "Stop loss"}
 
 
 def test_traces_bullish_trend_color() -> None:
     frame = _make_candles(5)
     rows = frame.with_columns(pl.lit("BULLISH").alias("direction")).to_dicts()
     traces = _asset_traces(rows, [])
-    line_traces = [t for t in traces if t.get("type") == "scattergl" and t.get("mode") == "lines"]
+    line_traces = [t for t in traces if t.get("type") == "scatter" and t.get("mode") == "lines"]
     colors = {t["line"]["color"] for t in line_traces}
     assert _TREND_COLORS["BULLISH"] in colors
 
@@ -211,7 +218,7 @@ def test_traces_bearish_trend_color() -> None:
     frame = _make_candles(5)
     rows = frame.with_columns(pl.lit("BEARISH").alias("direction")).to_dicts()
     traces = _asset_traces(rows, [])
-    line_traces = [t for t in traces if t.get("type") == "scattergl" and t.get("mode") == "lines"]
+    line_traces = [t for t in traces if t.get("type") == "scatter" and t.get("mode") == "lines"]
     colors = {t["line"]["color"] for t in line_traces}
     assert _TREND_COLORS["BEARISH"] in colors
 

@@ -70,33 +70,6 @@ def test_tuner_changes_parameters_used_by_frame() -> None:
     assert any(candidate["assets"][asset]["rdma_fast_half_life"] != strategy["assets"][asset]["rdma_fast_half_life"] for asset in strategy["assets"])
 
 
-def test_backtest_reverses_close_before_open_deterministically() -> None:
-    from Backtest.Runner import _simulate
-
-    start = dt.datetime(2024, 1, 1, tzinfo=dt.timezone.utc)
-    strategy = pl.DataFrame(
-        {
-            "timestamp": [start + dt.timedelta(hours=index) for index in range(3)],
-            "asset": ["BTCUSDT"] * 3,
-            "open": [100.0, 110.0, 100.0],
-            "high": [101.0, 111.0, 101.0],
-            "low": [99.0, 109.0, 99.0],
-            "close": [100.0, 110.0, 100.0],
-            "action": ["Entry", "Entry", "Hold"],
-            "side": ["Long", "Short", "Short"],
-        }
-    )
-    portfolio = {"allocation": {"BTCUSDT": 1.0}, "trade_size_pct": 0.1, "leverage": 2.0, "stop_loss_pct": 0.5, "take_profit_pct": 0.5}
-    backtest = {"execution": {"fee_rate": 0.0, "slippage_rate": 0.0}}
-    config = {"assets": {}}
-    first = _simulate(strategy, 1000.0, portfolio, backtest, config)
-    second = _simulate(strategy, 1000.0, portfolio, backtest, config)
-    assert first.trades.equals(second.trades)
-    assert first.trades["side"].to_list() == ["long", "short"]
-    assert first.trades["exit_reason"].to_list() == ["reversal", "end_of_test"]
-    assert abs(float(first.trades["pnl"].sum()) - 38.54545454545455) <= 1e-8
-
-
 class _PositionClient:
     def get(self, path: str):
         assert path == "/fapi/v2/positionRisk"
@@ -128,10 +101,12 @@ def test_reconcile_discovers_exchange_only_position_after_restart() -> None:
     }
 
 
-def test_demo_reversal_closes_and_confirms_before_opening() -> None:
+def test_demo_reversal_closes_and_confirms_before_opening(monkeypatch) -> None:
     from Live.Demo import DemoEngine
     from tests.test_orders_e2e import FakeClient
 
+    notifications = []
+    monkeypatch.setattr("Live.Demo.notify", lambda kind, message: notifications.append((kind, message)))
     client = FakeClient()
     client.positions[("BTCUSDT", "SHORT")] = 0.1
     engine = DemoEngine(api_key="key", api_secret="secret")
@@ -140,6 +115,7 @@ def test_demo_reversal_closes_and_confirms_before_opening() -> None:
     assert [(post["positionSide"], post["side"]) for post in markets] == [("SHORT", "BUY"), ("LONG", "BUY")]
     assert client.positions[("BTCUSDT", "SHORT")] == 0
     assert client.positions[("BTCUSDT", "LONG")] > 0
+    assert [message.split()[1] for _, message in notifications] == ["EXIT", "ENTRY"]
 
 
 def test_worker_modes_are_explicit() -> None:

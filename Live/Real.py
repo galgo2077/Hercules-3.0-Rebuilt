@@ -26,6 +26,7 @@ class RealEngine(DemoEngine):
         # Override rest URL to production endpoint
         self._rest_url = _REAL_REST
         self._ws_url = _REAL_WS
+        self._environment = "REAL"
 
     def start(self) -> None:
         log.warning("[%s] STARTING REAL PRODUCTION ENGINE — live funds at risk", self._label)

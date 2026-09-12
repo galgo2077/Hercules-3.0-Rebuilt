@@ -16,10 +16,12 @@ def _load_accounts() -> list[dict]:
 
 
 def main() -> None:
+    from Live.Notifications import install_logging_notifications
     from Live.Server import main as serve
     from Live.Worker import WorkerManager
     from SharedParams.Config import load
 
+    install_logging_notifications()
     workers = WorkerManager(_load_accounts)
     workers.start()
     config = load()

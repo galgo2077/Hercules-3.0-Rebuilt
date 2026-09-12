@@ -15,6 +15,7 @@ import websockets
 
 from Dataframe.CandleBuffer import CandleBuffer
 from Live.Execution import stream_asset
+from Live.Notifications import notify
 from Live.Risk import RiskState, check_entry, on_entry, on_exit, size_trade
 
 log = logging.getLogger(__name__)
@@ -129,6 +130,7 @@ class PaperEngine:
         )
         self._persist()
         log.info("PAPER %s %s @ %.4f (%.2f USDT) SL=%s TP=%s", side, asset, price, amount, f"{sl:.4f}" if sl else "none", f"{tp:.4f}" if tp else "none")
+        notify("TRADE", f"PAPER ENTRY {side} {asset} size={amount:.2f} entry={price:.8g}")
 
     def _exit(self, asset: str) -> None:
         pos = self._positions.pop(asset, None)
@@ -150,6 +152,7 @@ class PaperEngine:
         self._risk.current_equity += pnl
         self._persist()
         log.info("PAPER EXIT %s %s pnl=%.4f equity=%.2f", asset, pos.side, pnl, self._risk.current_equity)
+        notify("TRADE", f"PAPER EXIT {pos.side} {asset} pnl={pnl:.4f} equity={self._risk.current_equity:.2f}")
 
     def _on_closed_candle(self, msg: dict[str, Any]) -> None:
         import polars as pl

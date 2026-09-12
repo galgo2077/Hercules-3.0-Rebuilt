@@ -75,10 +75,36 @@ def _asset_traces(rows: list[dict[str, object]], trades: list[dict[str, object]]
         }
     ]
     start = 0
+    seen_trends: set[str] = set()
     for direction, group in groupby(str(row["direction"]) for row in rows):
         end = start + sum(1 for _ in group) - 1
-        traces.append({"type": "scattergl", "x": timestamps[max(0, start - 1) : end + 1], "y": closes[max(0, start - 1) : end + 1], "mode": "lines", "line": {"color": _TREND_COLORS.get(direction, "#95a5a6"), "width": 2}, "hoverinfo": "skip", "showlegend": False})
+        traces.append(
+            {
+                "type": "scatter",
+                "x": timestamps[max(0, start - 1) : end + 1],
+                "y": closes[max(0, start - 1) : end + 1],
+                "mode": "lines",
+                "line": {"color": _TREND_COLORS.get(direction, "#95a5a6"), "width": 2},
+                "hoverinfo": "skip",
+                "name": f"{direction.title()} trend",
+                "showlegend": direction not in seen_trends,
+            }
+        )
+        seen_trends.add(direction)
         start = end + 1
+    for name, key, color in (("Take profit", "take_profit", "#2ecc71"), ("Stop loss", "stop_loss", "#e74c3c")):
+        selected = [trade for trade in trades if trade.get(key) is not None]
+        if selected:
+            traces.append(
+                {
+                    "type": "scatter",
+                    "x": [point for trade in selected for point in (trade["timestamp"], trade["exit_timestamp"], None)],
+                    "y": [point for trade in selected for point in (trade[key], trade[key], None)],
+                    "mode": "lines",
+                    "line": {"color": color, "width": 1, "dash": "dash"},
+                    "name": name,
+                }
+            )
     for kind, color in _TRADE_COLORS.items():
         selected = [trade for trade in trades if (str(trade["type"]), str(trade["outcome"])) == kind]
         if not selected:
@@ -92,9 +118,9 @@ def _asset_traces(rows: list[dict[str, object]], trades: list[dict[str, object]]
         lines_y = [point for trade in selected for point in (float(cast(float | int | str, trade["open"])), float(cast(float | int | str, trade["exit_price"])), None)]
         traces.extend(
             [
-                {"type": "scattergl", "x": lines_x, "y": lines_y, "mode": "lines", "line": {"color": color, "width": 1, "dash": "dot"}, "hoverinfo": "skip", "showlegend": False},
-                {"type": "scattergl", "x": entries, "y": opens, "mode": "markers", "marker": {"color": color, "size": 14, "symbol": "triangle-up" if is_long else "triangle-down"}, "name": f"{kind[0]} {kind[1]} entry"},
-                {"type": "scattergl", "x": exits, "y": exit_prices, "mode": "markers", "marker": {"color": color, "size": 12, "symbol": "triangle-down" if is_long else "triangle-up"}, "name": f"{kind[0]} {kind[1]} exit"},
+                {"type": "scatter", "x": lines_x, "y": lines_y, "mode": "lines", "line": {"color": color, "width": 1, "dash": "dot"}, "hoverinfo": "skip", "showlegend": False},
+                {"type": "scatter", "x": entries, "y": opens, "mode": "markers", "marker": {"color": color, "size": 14, "symbol": "triangle-up" if is_long else "triangle-down"}, "name": f"{kind[0]} {kind[1]} entry"},
+                {"type": "scatter", "x": exits, "y": exit_prices, "mode": "markers", "marker": {"color": color, "size": 12, "symbol": "triangle-down" if is_long else "triangle-up"}, "name": f"{kind[0]} {kind[1]} exit"},
             ]
         )
     return traces

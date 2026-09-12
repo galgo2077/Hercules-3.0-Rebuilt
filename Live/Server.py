@@ -251,6 +251,7 @@ def get_candles(user: _User, asset: str = "BTCUSDT", limit: int = 200, interval:
     from datetime import datetime, timedelta, timezone
 
     from Dataframe.Binance import INTERVAL_MS, fetch_historical
+    from Dataframe.Frame import build
 
     if not 1 <= limit <= 1000:
         raise HTTPException(status_code=400, detail="limit must be between 1 and 1000")
@@ -265,7 +266,7 @@ def get_candles(user: _User, asset: str = "BTCUSDT", limit: int = 200, interval:
     end = datetime.now(timezone.utc)
     start = end - timedelta(milliseconds=INTERVAL_MS[interval] * limit)
     df = fetch_historical([asset], start.isoformat(), end.isoformat(), interval=interval)
-    return df.tail(limit).to_dicts()
+    return build(df).tail(limit).to_dicts()
 
 
 # ── Kill switch ───────────────────────────────────────────────────────────────
@@ -296,11 +297,33 @@ def kill_reset(user: _User) -> dict[str, str]:
 
 
 @app.get("/api/backtest")
-def run_backtest_endpoint(user: _User) -> dict[str, Any]:
-    from Backtest.Runner import run
+def run_backtest_endpoint(user: _User, asset: str = "BTCUSDT") -> dict[str, Any]:
+    import polars as pl
 
-    result = run()
-    return {"trades": result.trades.to_dicts(), "results": result.results.to_dicts()}
+    from Backtest.Runner import run
+    from Backtest.Visualizator.app import _asset_figure
+
+    golden = json.loads((_ROOT / "Vault" / "golden_baseline.json").read_text(encoding="utf-8"))
+    config = golden["config"]
+    asset = asset.upper()
+    if asset not in config["assets"]:
+        raise HTTPException(status_code=400, detail="unsupported asset")
+    strategy = run(start=config["start"], end=config["end"], assets=config["assets"], initial_cash=100.0).strategy
+    trades = pl.DataFrame(golden["trades"]).with_columns(pl.col("timestamp", "exit_timestamp").str.to_datetime(time_zone="UTC"))
+    asset_strategy = strategy.filter(pl.col("asset") == asset).sort("timestamp")
+    asset_trades = trades.filter(pl.col("asset") == asset)
+    figure = _asset_figure(strategy, trades, asset)
+    x_range = list(figure.layout.xaxis.range or ())
+    visible = asset_strategy.filter(pl.col("timestamp") <= x_range[-1]) if x_range else asset_strategy
+    return {
+        "asset": asset,
+        "source": "golden-baseline",
+        "traces": [trace.to_plotly_json() for trace in figure.data],
+        "x_range": x_range,
+        "y_range": list(figure.layout.yaxis.range or ()),
+        "last": visible.tail(1).to_dicts()[0],
+        "trade_count": asset_trades.height,
+    }
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────

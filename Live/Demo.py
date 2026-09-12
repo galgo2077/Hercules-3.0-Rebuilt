@@ -15,6 +15,7 @@ import websockets
 from Dataframe.CandleBuffer import CandleBuffer
 from Live._client import BinanceClient
 from Live.Execution import stream_asset
+from Live.Notifications import notify
 from Live.Positions import PositionTracker
 from Live.Risk import RiskState, check_entry, size_trade, update_equity
 
@@ -67,6 +68,7 @@ class DemoEngine:
         self._reconnect: int = int(self._live.get("reconnect_delay_s", 5))
         self._rest_url = _DEMO_REST
         self._ws_url = _DEMO_WS
+        self._environment = "TESTNET"
         self._tracker = PositionTracker()
         self._buffer = CandleBuffer(capacity=600)
         self._running = False
@@ -189,6 +191,7 @@ class DemoEngine:
                 self._refresh(client)
                 if not self._tracker.get(asset, old_side).is_flat:
                     raise RuntimeError(f"exchange did not confirm {old_side} close for {asset}")
+                notify("TRADE", f"{self._environment} EXIT {old_side} {asset} account={self._label}")
             allowed, reason = check_entry(self._risk, ex_side, asset, amount, amount / leverage)
             if not allowed:
                 log.warning("entry blocked %s %s: %s", asset, ex_side, reason)
@@ -200,8 +203,10 @@ class DemoEngine:
                 log.info("DEMO ENTRY SHORT %s %.2f USDT lev=%d sl=%.3f tp=%.3f", asset, amount, leverage, risk["stop_loss_pct"] or 0, risk["take_profit_pct"] or 0)
                 Short.enter(client, asset, amount, leverage, stop_loss_pct=risk["stop_loss_pct"], take_profit_pct=risk["take_profit_pct"])
             self._refresh(client)
-            if self._tracker.get(asset, ex_side).is_flat:
+            position = self._tracker.get(asset, ex_side)
+            if position.is_flat:
                 raise RuntimeError(f"exchange did not confirm {ex_side} entry for {asset}")
+            notify("TRADE", f"{self._environment} ENTRY {ex_side} {asset} size={position.size_usdt:.2f} entry={position.entry_price:.8g} account={self._label}")
 
         elif row.get("exit_required"):
             pos = self._tracker.get(asset)
@@ -212,6 +217,8 @@ class DemoEngine:
                 log.info("DEMO EXIT SHORT %s", asset)
                 Short.exit(client, asset)
             self._refresh(client)
+            if pos.side in {"LONG", "SHORT"} and self._tracker.get(asset, pos.side).is_flat:
+                notify("TRADE", f"{self._environment} EXIT {pos.side} {asset} account={self._label}")
 
     async def _listen(self) -> None:
         url = _stream_url(self._assets, self._interval).replace(_DEMO_WS, self._ws_url, 1)
